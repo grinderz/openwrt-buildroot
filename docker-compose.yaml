@@ -1,0 +1,19 @@
+---
+
+services:
+  srcbuilder:
+    image: varch/openwrt-srcbuilder:latest
+    build:
+      context: .
+      dockerfile: srcbuilder.Dockerfile
+    stdin_open: true
+    tty: true
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 262144
+    environment:
+      TERM: xterm-256color
+      COLORTERM: truecolor
+    volumes:
+     - ./:/builder/

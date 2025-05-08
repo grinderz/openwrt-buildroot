@@ -1,0 +1,32 @@
+uci batch <<__EOF__
+
+# settings
+
+set.network.lan.proto="dhcp"
+commit network
+
+# timezone
+
+set system.@system[0].hostname='OpenWrt'
+set system.@system[0].zonename='Europe/Moscow'
+set system.@system[0].timezone='MSK-3'
+commit system
+
+# ntp servers
+
+set system.@timeserver[0].enabled='1'
+set system.@timeserver[0].enable_server='0'
+set system.@timeserver[0].use_dhcp='0'
+delete system.@timeserver[0].server
+add_list system.@timeserver[0].server='0.ru.pool.ntp.org'
+add_list system.@timeserver[0].server='1.ru.pool.ntp.org'
+add_list system.@timeserver[0].server='2.ru.pool.ntp.org'
+add_list system.@timeserver[0].server='3.ru.pool.ntp.org'
+commit system
+
+__EOF__
+
+# disable UPS kill
+[ -f /etc/init.d/nut-monitor ] && sed -i '/echo "POWERDOWNFLAG \/var\/run\/killpower"/d' /etc/init.d/nut-monitor
+
+exit 0

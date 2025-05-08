@@ -1,0 +1,32 @@
+Index: config/Config-kernel.in
+===================================================================
+--- a/config/Config-kernel.in
++++ b/config/Config-kernel.in
+@@ -2,6 +2,12 @@
+ #
+ # Copyright (C) 2006-2014 OpenWrt.org
+ 
++config KERNEL_VERMAGIC
++	string "Specify vermagic for the build"
++	default ""
++	help
++	  Specify kernel vermagic. Leave it empty if you don't know what it is.
++
+ config KERNEL_BUILD_USER
+ 	string "Custom Kernel Build User Name"
+ 	default "builder" if BUILDBOT
+Index: include/kernel-defaults.mk
+===================================================================
+--- a/include/kernel-defaults.mk
++++ b/include/kernel-defaults.mk
+@@ -127,7 +127,9 @@ define Kernel/Configure/Default
+ 		cp $(LINUX_DIR)/.config.set $(LINUX_DIR)/.config.prev; \
+ 	}
+ 	$(_SINGLE) [ -d $(LINUX_DIR)/user_headers ] || $(KERNEL_MAKE) $(if $(findstring uml,$(BOARD)),ARCH=$(ARCH)) INSTALL_HDR_PATH=$(LINUX_DIR)/user_headers headers_install
+-	grep '=[ym]' $(LINUX_DIR)/.config.set | LC_ALL=C sort | $(MKHASH) md5 > $(LINUX_DIR)/.vermagic
++	VERMAGIC=`grep CONFIG_KERNEL_VERMAGIC $(TOPDIR)/.config | awk -F= '{print $$$$2}' | sed -e 's/"\(.*\)"/\1/g'`; \
++	[ -n "$$$$VERMAGIC" ] && echo $$$$VERMAGIC > $(LINUX_DIR)/.vermagic || \
++	( $(SH_FUNC) grep '=[ym]' $(LINUX_DIR)/.config.set | LC_ALL=C sort | $(MKHASH) md5 > $(LINUX_DIR)/.vermagic )
+ endef
+ 
+ define Kernel/Configure/Initramfs

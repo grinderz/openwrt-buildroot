@@ -1,0 +1,18 @@
+{
+    "sync-rsync.exclude": [
+        ".git",
+        ".vscode",
+        "openwrt",
+        ".pc",
+        "artifacts"
+    ],
+    "sync-rsync.onSaveIndividual": true,
+    "sync-rsync.remote": "grinderz@192.168.1.147:/home/grinderz/sources/openwrt-buildroot",
+    "sync-rsync.options": [
+        
+
+    ],
+    "sync-rsync.chmod": "",
+    "sync-rsync.delete": true,
+    "makefile.configureOnOpen": false
+}

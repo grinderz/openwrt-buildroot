@@ -1,0 +1,4 @@
+001-force-vermagic.patch
+002-wireless-regdb-unlock.patch
+003-mtd-spinand-support-for-FORESEE.patch
+004-mtd-spinand-fix-support-for-FORESEE.patch

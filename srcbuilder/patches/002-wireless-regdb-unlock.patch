@@ -1,0 +1,46 @@
+Index: package/firmware/wireless-regdb/patches/500-world-regd-5GHz.patch
+===================================================================
+--- a/package/firmware/wireless-regdb/patches/500-world-regd-5GHz.patch
++++ /dev/null
+@@ -1,16 +0,0 @@
+-Remove the NO-IR flag from channels 36-48 on the World domain,
+-to make it usable for AP mode.
+-
+-Signed-off-by: Felix Fietkau <nbd@nbd.name>
+----
+---- a/db.txt
+-+++ b/db.txt
+-@@ -19,7 +19,7 @@ country 00:
+- 	# Channel 14. Only JP enables this and for 802.11b only
+- 	(2474 - 2494 @ 20), (20), NO-IR, NO-OFDM
+- 	# Channel 36 - 48
+--	(5170 - 5250 @ 80), (20), NO-IR, AUTO-BW
+-+	(5170 - 5250 @ 80), (20), AUTO-BW
+- 	# Channel 52 - 64
+- 	(5250 - 5330 @ 80), (20), NO-IR, DFS, AUTO-BW
+- 	# Channel 100 - 144
+Index: package/firmware/wireless-regdb/Makefile
+===================================================================
+--- a/package/firmware/wireless-regdb/Makefile
++++ b/package/firmware/wireless-regdb/Makefile
+@@ -1,14 +1,16 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=wireless-regdb
+-PKG_VERSION:=2025.02.20
++PKG_VERSION:=2070.02.20
+ PKG_RELEASE:=1
+ PKG_LICENSE:=ISC
+ PKG_LICENSE_FILES:=LICENSE
+ 
+-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
+-PKG_SOURCE_URL:=@KERNEL/software/network/wireless-regdb/
+-PKG_HASH:=57f8e7721cf5a880c13ae0c202edbb21092a060d45f9e9c59bcd2a8272bfa456
++PKG_SOURCE_URL:=https://github.com/grinderz/wireless-regdb
++PKG_SOURCE_PROTO:=git
++PKG_SOURCE_DATE:=2025-04-22
++PKG_SOURCE_VERSION:=c6e67bba92f803187b32d520ef4af1206f607ecf
++PKG_MIRROR_HASH:=2c952f3b7bb2718199b74cf1e964d0d0f6be4308f95eb665e1d93c489cba967d
+ 
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+ 

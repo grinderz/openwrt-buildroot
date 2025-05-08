@@ -1,0 +1,79 @@
+From ba69f2db22b942b3ac05aa04a6efe733e2bf40e3 Mon Sep 17 00:00:00 2001
+From: Dim Fish <dimfish@gmail.com>
+Date: Fri, 14 Feb 2025 12:39:15 +0300
+Subject: [PATCH 1/2] generic: mtd: spinand: force update_cache_variants to use
+ reset for Foresee NAND
+
+Force update_cache_variantsvariants to use reset for Foresee NAND with bad blocks.
+
+Signed-off-by: Dim Fish <dimfish@gmail.com>
+---
+ ...-mtd-spinand-fix-support-for-FORESEE.patch | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+ create mode 100644 target/linux/generic/pending-6.6/411-mtd-spinand-fix-support-for-FORESEE.patch
+
+diff --git a/target/linux/generic/pending-6.6/411-mtd-spinand-fix-support-for-FORESEE.patch b/target/linux/generic/pending-6.6/411-mtd-spinand-fix-support-for-FORESEE.patch
+new file mode 100644
+index 00000000000000..48a6515b56a238
+--- /dev/null
++++ b/target/linux/generic/pending-6.6/411-mtd-spinand-fix-support-for-FORESEE.patch
+@@ -0,0 +1,19 @@
++Force update_cache_variants to use reset for Foresee NAND with bad blocks
++
++Tested on Xiaomi AX3000T + F35SQA001G with bad blocks and without bad blocks
++
++Signed-off-by: Dim Fish <dimfish@gmail.com>
++
++--- a/drivers/mtd/nand/spi/foresee.c
+++++ b/drivers/mtd/nand/spi/foresee.c
++@@ -22,8 +22,8 @@ static SPINAND_OP_VARIANTS(write_cache_v
++ 		SPINAND_PROG_LOAD(true, 0, NULL, 0));
++ 
++ static SPINAND_OP_VARIANTS(update_cache_variants,
++-		SPINAND_PROG_LOAD_X4(false, 0, NULL, 0),
++-		SPINAND_PROG_LOAD(false, 0, NULL, 0));
+++		SPINAND_PROG_LOAD_X4(true, 0, NULL, 0),
+++		SPINAND_PROG_LOAD(true, 0, NULL, 0));
++ 
++ static int f35sqa002g_ooblayout_ecc(struct mtd_info *mtd, int section,
++ 				    struct mtd_oob_region *region)
+
+From a116848ce91ba6798c8515b9fa283a1f9a907832 Mon Sep 17 00:00:00 2001
+From: Dim Fish <dimfish@gmail.com>
+Date: Tue, 18 Feb 2025 11:25:09 +0300
+Subject: [PATCH 2/2] uboot-mediatek: mtd: spinand: force update_cache_variants
+ to use reset for Foresee NAND
+
+Force update_cache_variantsvariants to use reset for Foresee NAND with bad blocks.
+
+Signed-off-by: Dim Fish <dimfish@gmail.com>
+---
+ ...-mtd-spinand-fix-support-for-FORESEE.patch | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+ create mode 100644 package/boot/uboot-mediatek/patches/101-03-mtd-spinand-fix-support-for-FORESEE.patch
+
+diff --git a/package/boot/uboot-mediatek/patches/101-03-mtd-spinand-fix-support-for-FORESEE.patch b/package/boot/uboot-mediatek/patches/101-03-mtd-spinand-fix-support-for-FORESEE.patch
+new file mode 100644
+index 00000000000000..48a6515b56a238
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/101-03-mtd-spinand-fix-support-for-FORESEE.patch
+@@ -0,0 +1,19 @@
++Force update_cache_variants to use reset for Foresee NAND with bad blocks
++
++Tested on Xiaomi AX3000T + F35SQA001G with bad blocks and without bad blocks
++
++Signed-off-by: Dim Fish <dimfish@gmail.com>
++
++--- a/drivers/mtd/nand/spi/foresee.c
+++++ b/drivers/mtd/nand/spi/foresee.c
++@@ -22,8 +22,8 @@ static SPINAND_OP_VARIANTS(write_cache_v
++ 		SPINAND_PROG_LOAD(true, 0, NULL, 0));
++ 
++ static SPINAND_OP_VARIANTS(update_cache_variants,
++-		SPINAND_PROG_LOAD_X4(false, 0, NULL, 0),
++-		SPINAND_PROG_LOAD(false, 0, NULL, 0));
+++		SPINAND_PROG_LOAD_X4(true, 0, NULL, 0),
+++		SPINAND_PROG_LOAD(true, 0, NULL, 0));
++ 
++ static int f35sqa002g_ooblayout_ecc(struct mtd_info *mtd, int section,
++ 				    struct mtd_oob_region *region)
