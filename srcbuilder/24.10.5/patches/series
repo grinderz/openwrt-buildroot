@@ -1,0 +1,5 @@
+001-force-vermagic.patch
+002-wireless-regdb-unlock.patch
+003-cudy-ap3000-motorcomm.patch
+004-backport-motorcomm-yt8821-phy-driver.patch
+005-add-kmod-phy-motorcomm.patch

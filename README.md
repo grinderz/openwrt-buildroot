@@ -1,8 +1,13 @@
 # Openwrt src and image builder
 
+# Requirements
+
+- make >= 4.4.x
+
 # TODO
 
 - add fantastic repo https://fantastic-packages.github.io/packages/releases/24.10/
+- github actions https://github.com/csharper2005/openwrt-actions/tree/main/.github/workflows
 
 # Checklists
 

@@ -1,4 +1,6 @@
 **/.DS_Store
 **/.pc/
+.idea/
 artifacts/
 openwrt/
+openwrt-*/

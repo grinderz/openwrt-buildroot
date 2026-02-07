@@ -6,6 +6,9 @@ services:
     build:
       context: .
       dockerfile: srcbuilder.Dockerfile
+      args:
+        - UID
+        - GID
     stdin_open: true
     tty: true
     ulimits:
@@ -16,4 +19,4 @@ services:
       TERM: xterm-256color
       COLORTERM: truecolor
     volumes:
-     - ./:/builder/
+     - ./:/builder/src/
