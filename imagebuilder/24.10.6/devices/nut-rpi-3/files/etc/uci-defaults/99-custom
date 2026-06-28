@@ -1,0 +1,29 @@
+uci batch <<__EOF__
+
+# settings
+
+set.network.lan.proto="dhcp"
+commit network
+
+# timezone
+
+set system.@system[0].hostname='es700-nut-rp-3'
+set system.@system[0].zonename='Europe/Moscow'
+set system.@system[0].timezone='MSK-3'
+commit system
+
+# ntp servers
+
+set system.@timeserver[0].enabled='1'
+set system.@timeserver[0].enable_server='0'
+set system.@timeserver[0].use_dhcp='0'
+delete system.@timeserver[0].server
+add_list system.@timeserver[0].server='216.239.35.0'
+add_list system.@timeserver[0].server='216.239.35.4'
+add_list system.@timeserver[0].server='216.239.35.8'
+add_list system.@timeserver[0].server='216.239.35.12'
+commit system
+
+__EOF__
+
+exit 0

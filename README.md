@@ -6,8 +6,61 @@
 
 # TODO
 
-- add fantastic repo https://fantastic-packages.github.io/packages/releases/24.10/
 - github actions https://github.com/csharper2005/openwrt-actions/tree/main/.github/workflows
+- add files for almond 3S https://github.com/fildunsky/openwrt/commit/4c4f6be9a9d275e164c956df7e6e500532182f55#diff-73dd4ffe9df107bd271e3e636bbacebf6bb212f5a8ef42295f36b6c54b1d6334
+- add uci-default wlan_name (WIFI)
+- clean image profiles
+- map packages dir + pass to src imagebuilder (local packages from src build)
+- imagebuilder add DISABLED_SERVICES
+- customfeeds.conf
+- repositeries.conf
+- make img.ib.% (package_whatdepends, package_depends, manifest)
+- https://dl.openwrt.ai/releases/24.10/packages/aarch64_cortex-a53/kiddin9/
+- https://downloads.immortalwrt.org/releases/24.10.2/packages/aarch64_cortex-a53/luci/luci-theme-argon_2.4.2-r20250617_all.ipk
+- https://github.com/koshev-msk/modemfeed
+- s3 securify https://4pda.to/forum/index.php?showtopic=1085698&view=findpost&p=137406633 https://ssclash.notion.site/ZRAM-20a89188f6b4809aa3d4f4297356a27f
+- replace mtk firmware https://forum.openwrt.org/t/retired-thread-gl-inet-flint-2-gl-mt6000-snapshot-experimental-bleeding-edge/197278/39
+- build pkg action https://github.com/zerolabnet/SSClash/blob/main/.github/workflows/build.ym
+- https://github.com/vernette/beszel-agent-openwrt/blob/master/.github/workflows/build-package.yml
+- https://github.com/bigmalloy/luci-app-fancontrol
+- https://github.com/Slava-Shchipunov/awg-openwrt
+- https://github.com/bigmalloy/luci-app-fancontrol
+- Vermagic cat build_dir/target-*/linux-*/linux-*/.vermagic
+
+# Repos
+
+## fantastic
+
+- src: https://github.com/fantastic-packages/packages/tree/24.10 
+- bin: https://github.com/fantastic-packages/releases/tree/archive/24.10
+
+## routerich
+
+- bin: https://github.com/routerich/packages.routerich/tree/24.10.5/routerich
+
+## modem extras
+
+- bin: https://github.com/4IceG/Modem-extras/tree/main/myrepo
+
+## modemfeed
+
+- src: https://github.com/koshev-msk/modemfeed.git
+- bin: 
+
+## kiddin9
+
+- bin: https://dl.openwrt.ai/packages-24.10/*/kiddin9/
+
+
+# Pkgs
+
+- beszel-agent-openwrt https://github.com/vernette/beszel-agent-openwrt
+- luci-theme-proton2025 https://github.com/ChesterGoodiny/luci-theme-proton2025
+
+# Patch
+
+- huasifei_wh3000 fancontrol https://github.com/padavanonly/immortalwrt-mt798x-6.6/pull/211
+- 
 
 # Checklists
 
@@ -23,16 +76,6 @@ dd if=firmware.trx of=firmware.bin bs=2506724 skip=1
 unsquashfs firmware.bin
 ```
 
-### Src default packages
-
-* wpad-basic-mbedtls
-
-### Profile device packages netgear_wnr3500l-v1-na
-
-* kmod-b43
-* kmod-usb-ohci
-* kmod-usb2
-
 ## ramips/mt7621
 
 ### Unpack
@@ -41,20 +84,6 @@ unsquashfs firmware.bin
 dd if=-squashfs-sysupgrade.bin of=firmware.bin bs=3183208 skip=1
 unsquashfs firmware.bin
 ```
-
-### Src default packages
-
-* wpad-basic-mbedtls
-* uboot-envtools
-* kmod-crypto-hw-eip93
-
-### Profile device packages asus_rt-n56u-b1
-
-* kmod-mt7603
-* kmod-mt76x2
-* kmod-usb3
-* kmod-usb-ledtrig-usbport
-* -uboot-envtools
 
 ## mediatek/filogic
 
@@ -72,38 +101,6 @@ dd if=-squashfs-sysupgrade.itb of=firmware.bin bs=5668864 skip=1
 unsquashfs firmware.bin
 ```
 
-
-### Src default packages
-
-* fitblk
-* kmod-phy-aquantia
-* kmod-crypto-hw-safexcel
-* wpad-basic-mbedtls
-* uboot-envtools
-
-### Profile device packages cudy_tr3000-v1
-
-* kmod-usb3
-* kmod-mt7915e
-* kmod-mt7981-firmware
-* mt7981-wo-firmware
-
-### Profile device packages glinet_gl-mt6000
-
-* e2fsprogs
-* f2fsck
-* mkf2fs
-* kmod-usb3
-* kmod-mt7915e
-* kmod-mt7986-firmware
-* mt7986-wo-firmware
-
-### Profile device packages xiaomi_mi-router-ax3000t-ubootmod
-
-* kmod-mt7915e
-* kmod-mt7981-firmware
-* mt7981-wo-firmware
-
 ## bcm27xx/bcm2710
 
 ### Unpack
@@ -114,20 +111,6 @@ dd if=-squashfs-sysupgrade.img of=firmware.bin bs=75497472 skip=1
 unsquashfs firmware.bin
 ```
 
-### Src default packages
-
-* 
-
-### Profile device packages rpi-3
-
-* cypress-firmware-43430-sdio
-* brcmfmac-nvram-43430-sdio
-* cypress-firmware-43455-sdio
-* brcmfmac-nvram-43455-sdio
-* kmod-brcmfmac
-* wpad-basic-mbedtls
-* iwinfo
-
 ## x86/64
 
 ### Unpack
@@ -137,31 +120,17 @@ gzip -d -squashfs-rootfs.img.gz
 unsquashfs -squashfs-rootfs.img
 ```
 
-### Src default packages
 
-* 
+# ImageBuilder in standalone mode (with patched kmod)
 
-### Profile device packages generic
-
-* kmod-amazon-ena
-* kmod-amd-xgbe
-* kmod-bnx2
-* kmod-dwmac-intel
-* kmod-e1000e
-* kmod-e1000
-* kmod-forcedeth
-* kmod-fs-vfat
-* kmod-igb
-* kmod-igc
-* kmod-ixgbe
-* kmod-r8169
-* kmod-tg3
-* kmod-drm-i915
-
-# Deprecated config since 24.10.1
-
-## GENERIC_SED_LINE_DELETE
-
-- CONFIG_BPF_TOOLCHAIN_BUILD_LLVM=y
-- CONFIG_HAS_BPF_TOOLCHAIN=y
-- CONFIG_USE_LLVM_BUILD=y
+```Makefile
+CONFIG_LINE_ADD := \
+	CONFIG_BUILDBOT=n \
+	CONFIG_IB_STANDALONE=y \
+	\
+	
+CONFIG_SED_LINE_DELETE := \
+	CONFIG_BUILDBOT=y \
+	CONFIG_IB_STANDALONE=n \
+	\
+```

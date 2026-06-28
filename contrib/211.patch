@@ -1,0 +1,736 @@
+From 0c7b600d779269ab6e2b2c810e2dcf136238b6af Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Sun, 31 Aug 2025 12:17:55 +0300
+Subject: [PATCH 1/2] base-files fake update fix
+
+Quick fix so users will not see "fake" update for base-files package and will not update it accidentally which leads to breaking the system making the FS become read-only
+---
+ package/base-files/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/package/base-files/Makefile b/package/base-files/Makefile
+index c78c073699f..7e6db32ddaa 100644
+--- a/package/base-files/Makefile
++++ b/package/base-files/Makefile
+@@ -13,7 +13,7 @@ include $(INCLUDE_DIR)/feeds.mk
+ 
+ PKG_NAME:=base-files
+ PKG_FLAGS:=nonshared
+-PKG_RELEASE:=$(COMMITCOUNT)
++PKG_RELEASE:=1860
+ 
+ PKG_FILE_DEPENDS:=$(PLATFORM_DIR)/ $(GENERIC_PLATFORM_DIR)/base-files/
+ PKG_BUILD_DEPENDS:=usign/host ucert/host
+
+From 43f8f8bc859cde1e9cd52472c55322dcaca02648 Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Sun, 31 Aug 2025 12:29:13 +0300
+Subject: [PATCH 2/2] Huasifei WH3000 Pro: luci-app-fancontrol + pwm-fan-fix
+ patch
+
+Without this patch fan sometimes spins faster than usual for a moment and then comes back to normal. This makes loud noise and uncomfortable feeling. This patch fixes that. I've taken it from https://github.com/GFuZan/fancontrol and https://github.com/GFuZan/OpenWrt-HusifeiWH3000PRO-Actions
+---
+ package/fancontrol/Makefile                   |  43 ++++
+ package/fancontrol/files/fancontrol.config    |   8 +
+ package/fancontrol/files/fancontrol.init      |  57 +++++
+ package/fancontrol/src/Makefile               |  13 ++
+ package/fancontrol/src/fancontrol.c           | 200 ++++++++++++++++++
+ package/luci-app-fancontrol/Makefile          |  18 ++
+ .../luci-static/resources/view/fancontrol.js  |  53 +++++
+ .../luci-app-fancontrol/po/ru/fancontrol.po   |  41 ++++
+ .../po/zh_Hans/fancontrol.po                  |  41 ++++
+ .../luci/menu.d/luci-app-fancontrol.json      |  13 ++
+ .../share/rpcd/acl.d/luci-app-fancontrol.json |  28 +++
+ .../mediatek/patches-6.6/998-add-mt5700.patch |  32 +++
+ .../patches-6.6/998-pwm-fan-fix.patch         |  45 ++++
+ 13 files changed, 592 insertions(+)
+ create mode 100644 package/fancontrol/Makefile
+ create mode 100644 package/fancontrol/files/fancontrol.config
+ create mode 100755 package/fancontrol/files/fancontrol.init
+ create mode 100644 package/fancontrol/src/Makefile
+ create mode 100644 package/fancontrol/src/fancontrol.c
+ create mode 100644 package/luci-app-fancontrol/Makefile
+ create mode 100644 package/luci-app-fancontrol/htdocs/luci-static/resources/view/fancontrol.js
+ create mode 100644 package/luci-app-fancontrol/po/ru/fancontrol.po
+ create mode 100644 package/luci-app-fancontrol/po/zh_Hans/fancontrol.po
+ create mode 100644 package/luci-app-fancontrol/root/usr/share/luci/menu.d/luci-app-fancontrol.json
+ create mode 100644 package/luci-app-fancontrol/root/usr/share/rpcd/acl.d/luci-app-fancontrol.json
+ create mode 100644 target/linux/mediatek/patches-6.6/998-add-mt5700.patch
+ create mode 100644 target/linux/mediatek/patches-6.6/998-pwm-fan-fix.patch
+
+diff --git a/package/fancontrol/Makefile b/package/fancontrol/Makefile
+new file mode 100644
+index 00000000000..eaeda221763
+--- /dev/null
++++ b/package/fancontrol/Makefile
+@@ -0,0 +1,43 @@
++include $(TOPDIR)/rules.mk
++
++PKG_NAME:=fancontrol
++PKG_VERSION:=1
++PKG_RELEASE:=3
++
++
++PKG_LICENSE:=MIT
++PKG_LICENSE_FILES:=LICENSE
++PKG_MAINTAINER:=JiaY-shi <shi05275@163.com>
++
++PKG_BUILD_PARALLEL:=1
++
++include $(INCLUDE_DIR)/package.mk
++
++define Package/fancontrol
++  SECTION:=utils
++  CATEGORY:=Utilities
++  TITLE:=FanControl for OpenWRT
++endef
++
++define Package/fancontrol/description
++  FanControl for OpenWRT.
++endef
++
++define Build/Prepare
++	mkdir -p $(PKG_BUILD_DIR)
++	$(CP) ./src/* $(PKG_BUILD_DIR)
++endef
++
++MAKE_FLAGS += \
++	-C $(PKG_BUILD_DIR)
++
++define Package/fancontrol/install
++	$(INSTALL_DIR) $(1)/usr/bin
++	$(INSTALL_BIN) $(PKG_BUILD_DIR)/fancontrol $(1)/usr/bin/fancontrol
++	$(INSTALL_DIR) $(1)/etc/config
++	$(INSTALL_BIN) ./files/fancontrol.config $(1)/etc/config/fancontrol
++	$(INSTALL_DIR) $(1)/etc/init.d
++	$(INSTALL_BIN) ./files/fancontrol.init $(1)/etc/init.d/fancontrol
++endef
++
++$(eval $(call BuildPackage,fancontrol))
+diff --git a/package/fancontrol/files/fancontrol.config b/package/fancontrol/files/fancontrol.config
+new file mode 100644
+index 00000000000..30f215c5bc7
+--- /dev/null
++++ b/package/fancontrol/files/fancontrol.config
+@@ -0,0 +1,8 @@
++config fancontrol settings
++    option enabled '1'
++    option thermal_file '/sys/class/thermal/thermal_zone0/temp'
++    option fan_file '/sys/class/hwmon/hwmon2/pwm1'
++    option start_temp '45'
++    option start_speed '35'
++    option max_speed '255'
++    option temp_div '1000'
+diff --git a/package/fancontrol/files/fancontrol.init b/package/fancontrol/files/fancontrol.init
+new file mode 100755
+index 00000000000..8f230ddc731
+--- /dev/null
++++ b/package/fancontrol/files/fancontrol.init
+@@ -0,0 +1,57 @@
++#!/bin/sh /etc/rc.common
++
++START=99
++STOP=01
++USE_PROCD=1
++
++NAME=fancontrol
++PROG=/usr/bin/$NAME
++
++start_service() {
++    config_load "$NAME"
++
++    local enabled
++    config_get enabled settings enabled
++    [ "$enabled" = "1" ] || { logger -t fancontrol "Instance \"$NAME\" disabled."; return 1; }
++
++    local thermal_file
++    local fan_file
++    local start_temp
++    local start_speed
++    local max_speed
++    local temp_div
++
++    config_get thermal_file settings thermal_file
++    config_get fan_file settings fan_file
++    config_get start_temp settings start_temp
++    config_get start_speed settings start_speed
++    config_get max_speed settings max_speed
++    config_get temp_div settings temp_div
++
++    procd_open_instance
++    procd_set_param command $PROG
++    [ -n "$thermal_file" ] && procd_append_param command -T "$thermal_file"
++    [ -n "$fan_file" ] && procd_append_param command -F "$fan_file"
++    [ -n "$start_temp" ] && procd_append_param command -t "$start_temp"
++    [ -n "$start_speed" ] && procd_append_param command -s "$start_speed"
++    [ -n "$max_speed" ] && procd_append_param command -m "$max_speed"
++    [ -n "$temp_div" ] && procd_append_param command -d "$temp_div"
++    procd_set_param respawn
++    procd_close_instance
++}
++
++start() {
++    start_service
++}
++
++stop() {
++    procd_kill_instance
++}
++
++reload() {
++    procd_reload_instance
++}
++
++service_triggers() {
++    procd_add_reload_trigger "fancontrol"
++}
+\ No newline at end of file
+diff --git a/package/fancontrol/src/Makefile b/package/fancontrol/src/Makefile
+new file mode 100644
+index 00000000000..459df9f5e16
+--- /dev/null
++++ b/package/fancontrol/src/Makefile
+@@ -0,0 +1,13 @@
++CC         := gcc
++CFLAGS     := -O3 -Wall -fomit-frame-pointer
++
++all: fancontrol
++
++fancontrol: %: %.o
++	$(CC) $(LDFLAGS) -o $@ $^
++
++%.o: %.c
++	$(CC) $(CFLAGS) $(INCLUDE) -o $@ -c $<
++
++clean:
++	rm -f fancontrol *.o *~
+\ No newline at end of file
+diff --git a/package/fancontrol/src/fancontrol.c b/package/fancontrol/src/fancontrol.c
+new file mode 100644
+index 00000000000..c1f814b6c52
+--- /dev/null
++++ b/package/fancontrol/src/fancontrol.c
+@@ -0,0 +1,200 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <sys/stat.h>
++#include <signal.h> 
++
++#define MAX_LENGTH 200
++#define MAX_TEMP 120
++
++// 定义全局变量
++char thermal_file[MAX_LENGTH] = "/sys/devices/virtual/thermal/thermal_zone0/temp";      // -T
++char fan_file[MAX_LENGTH] = "/sys/devices/virtual/thermal/cooling_device0/cur_state";   // -F
++
++int start_speed = 35;   // -s
++int start_temp = 45;    // -t
++int max_speed = 255;    // -m
++int temp_div = 1000;    // -d
++int debug_mode = 0;     // -D
++
++/**
++ * 底层读文件
++ */
++static int read_file(const char* path ,char* result ,size_t size) {
++    FILE* fp;
++    char* line = NULL;
++    size_t len = 0;
++    ssize_t read;
++
++    fp = fopen(path ,"r");
++    if (fp == NULL)
++        return -1;
++
++    if (( read = getline(&line ,&len ,fp) ) != -1) {
++        if (size != 0)
++            memcpy(result ,line ,size);
++        else
++            memcpy(result ,line ,read - 1);
++    }
++
++    fclose(fp);
++    if (line)
++        free(line);
++    return 0;
++}
++
++/**
++ * 底层写文件
++ */
++static size_t write_file(const char* path ,char* buf ,size_t len) {
++    FILE* fp = NULL;
++    size_t size = 0;
++    fp = fopen(path ,"w+");
++    if (fp == NULL) {
++        return 0;
++    }
++    size = fwrite(buf ,len ,1 ,fp);
++    fclose(fp);
++    return size;
++}
++
++/**
++ * 读取温度
++ */
++int get_temperature(char* thermal_file ,int div) {
++    char buf[8] = { 0 };
++    if (read_file(thermal_file ,buf ,0) == 0) {
++        return atoi(buf) / div;
++    }
++    return -1;
++}
++
++/**
++ * 读取风扇速度
++ */
++int get_fanspeed(char* fan_file) {
++    char buf[8] = { 0 };
++    if (read_file(fan_file ,buf ,0) == 0) {
++        return atoi(buf);
++    }
++    return -1;
++}
++
++/**
++ * 设置风扇转速
++ */
++int set_fanspeed(int fan_speed ,char* fan_file) {
++    char buf[8] = { 0 };
++    sprintf(buf ,"%d\n" ,fan_speed);
++    return write_file(fan_file ,buf ,strlen(buf));
++}
++
++/**
++ * 计算风扇转速
++ */
++int calculate_speed(int current_temp ,int max_temp ,int min_temp ,int max_speed ,int min_speed) {
++    if (current_temp < min_temp) {
++        return 0;
++    }
++    int fan_speed = ( current_temp - min_temp ) * ( max_speed - min_speed ) / ( max_temp - min_temp ) + min_speed;
++    if (fan_speed > max_speed) {
++        fan_speed = max_speed;
++    }
++    return fan_speed;
++}
++
++/**
++ * 判断文件是否存在方法
++ */
++static int file_exist(const char* name) {
++    struct stat buffer;
++    return stat(name ,&buffer);
++}
++
++/**
++ *  信号处理函数
++ */
++void handle_termination(int signum) {
++    // 设置风扇转速为 0
++    set_fanspeed(0 ,fan_file);
++    exit(EXIT_SUCCESS); // 优雅地退出程序
++}
++
++/**
++ * 注册信号处理函数
++ */
++void register_signal_handlers( ) {
++    struct sigaction sa;
++    memset(&sa ,0 ,sizeof(sa));
++    sa.sa_handler = handle_termination;
++    sigemptyset(&sa.sa_mask);
++    sigaction(SIGINT ,&sa ,NULL);
++    sigaction(SIGTERM ,&sa ,NULL);
++}
++
++/**
++ * 主函数
++ */
++int main(int argc ,char* argv[ ]) {
++    // 解析命令行选项
++    int opt;
++    while (( opt = getopt(argc ,argv ,"T:F:s:t:m:d:D:v:") ) != -1) {
++        switch (opt) {
++            case 'T':
++                snprintf(thermal_file ,sizeof(thermal_file) ,"%s" ,optarg);
++                break;
++            case 'F':
++                snprintf(fan_file ,sizeof(fan_file) ,"%s" ,optarg);
++                break;
++            case 's':
++                start_speed = atoi(optarg);
++                break;
++            case 't':
++                start_temp = atoi(optarg);
++                break;
++            case 'm':
++                max_speed = atoi(optarg);
++                break;
++            case 'd':
++                temp_div = atoi(optarg);
++                break;
++            case 'D':
++                debug_mode = atoi(optarg);
++                break;
++            default:
++                fprintf(stderr ,"Usage: %s [option]\n"
++                    "          -T sysfs         # temperature sysfs file, default is '%s'\n"
++                    "          -F sysfs         # fan sysfs file, default is '%s'\n"
++                    "          -s speed         # initial speed for fan startup, default is %d\n"
++                    "          -t temperature   # fan start temperature, default is %d°C\n"
++                    "          -m speed         # fan maximum speed, default is %d\n"
++                    "          -d div           # temperature divide, default is %d\n"
++                    "          -v               # verbose\n" ,argv[0] ,thermal_file ,fan_file ,start_speed ,start_temp ,max_speed ,temp_div);
++                exit(EXIT_FAILURE);
++        }
++    }
++    // 检测虚拟文件是否存在
++    if (file_exist(fan_file) != 0 || file_exist(thermal_file) != 0) {
++        fprintf(stderr ,"File: '%s' or '%s' not exist\n" ,fan_file ,thermal_file);
++        exit(EXIT_FAILURE);
++    }
++
++    // 注册退出信号
++    register_signal_handlers( );
++
++    // 监控风扇
++    while (1) {
++        int temperature = get_temperature(thermal_file ,temp_div);
++        // 有效温度时设置风扇速度
++        if (temperature > 0) {
++            int fan_speed = calculate_speed(temperature ,MAX_TEMP ,start_temp ,max_speed ,start_speed);
++            set_fanspeed(fan_speed ,fan_file);
++        }
++        if (debug_mode) {
++            fprintf(stdout ,"Temperature: %d°C, Fan Speed: %d\n" ,get_temperature(thermal_file ,temp_div) ,get_fanspeed(fan_file));
++        }
++        sleep(5);
++    }
++    return 0;
++}
+diff --git a/package/luci-app-fancontrol/Makefile b/package/luci-app-fancontrol/Makefile
+new file mode 100644
+index 00000000000..a1960af71f7
+--- /dev/null
++++ b/package/luci-app-fancontrol/Makefile
+@@ -0,0 +1,18 @@
++#
++# Copyright (C) 2008-2014 The LuCI Team <luci@lists.subsignal.org>
++#
++# This is free software, licensed under the Apache License, Version 2.0 .
++#
++
++include $(TOPDIR)/rules.mk
++
++LUCI_TITLE:=LuCI support for Fan Controller
++LUCI_DEPENDS:=+luci +fancontrol
++LUCI_PKGARCH:=all
++
++PKG_NAME:=luci-app-fancontrol
++PKG_VERSION:=1.0
++PKG_RELEASE:=1
++
++include $(TOPDIR)/feeds/luci/luci.mk
++# call BuildPackage - OpenWrt buildroot signature
+\ No newline at end of file
+diff --git a/package/luci-app-fancontrol/htdocs/luci-static/resources/view/fancontrol.js b/package/luci-app-fancontrol/htdocs/luci-static/resources/view/fancontrol.js
+new file mode 100644
+index 00000000000..704e2f2bd1c
+--- /dev/null
++++ b/package/luci-app-fancontrol/htdocs/luci-static/resources/view/fancontrol.js
+@@ -0,0 +1,53 @@
++'use strict';
++'require view';
++'require fs';
++'require form';
++'require uci';
++'require tools.widgets as widgets';
++
++return view.extend({
++	load: function () {
++		return Promise.all([
++			uci.load('fancontrol')
++		]);
++	},
++	render: async function (data) {
++		var m, s, o;
++
++		m = new form.Map('fancontrol', _('Fan Control'));
++		s = m.section(form.TypedSection, 'fancontrol', _('Settings'));
++		s.anonymous = true;
++
++		// 是否启用
++		o = s.option(form.Flag, 'enabled', _('Enable'), _('Enable'));
++		o.description = '';
++		o.rmempty = false;
++
++		// 温度文件
++		o = s.option(form.Value, 'thermal_file', _('Thermal File'), _('Thermal File'));
++		// o.placeholder = '/sys/devices/virtual/thermal/thermal_zone0/temp';
++		var temp_div = uci.get('fancontrol', 'settings', 'temp_div');
++		var temp = parseInt(await fs.read(uci.get('fancontrol', 'settings', 'thermal_file')));
++		if (temp_div > 0 && temp > 0) {
++			o.description = _('Current temperature:') + ' <b>' + (temp / temp_div) + '°C</b>';
++		} else {
++			o.description = _('Thermal File');
++		}
++
++		o = s.option(form.Value, 'fan_file', _('Fan File'), _('Fan Speed File'));
++		// o.placeholder = '/sys/devices/virtual/thermal/cooling_device0/cur_state';
++		var speed = parseInt(await fs.read(uci.get('fancontrol', 'settings', 'fan_file')));
++		o.description = _('Current speed:') + ' <b>' + (speed) + '</b>';
++
++		o = s.option(form.Value, 'start_speed', _('Initial Speed'), _('Please enter the initial speed for fan startup.'));
++		o.placeholder = '35';
++
++		o = s.option(form.Value, 'max_speed', _('Max Speed'), _('Please enter maximum fan speed.'));
++		o.placeholder = '255';
++
++		o = s.option(form.Value, 'start_temp', _('Start Temperature'), _('Please enter the fan start temperature.'));
++		o.placeholder = '45';
++
++		return m.render();
++	}
++});
+\ No newline at end of file
+diff --git a/package/luci-app-fancontrol/po/ru/fancontrol.po b/package/luci-app-fancontrol/po/ru/fancontrol.po
+new file mode 100644
+index 00000000000..d512a894b5f
+--- /dev/null
++++ b/package/luci-app-fancontrol/po/ru/fancontrol.po
+@@ -0,0 +1,41 @@
++msgid "Fan Control"
++msgstr "Управление вентилятором"
++
++msgid "Settings"
++msgstr "Настройки"
++
++msgid "Enable"
++msgstr "Включить"
++
++msgid "Thermal File"
++msgstr "Файл температуры"
++
++msgid "Fan File"
++msgstr "Файл управления вентилятором"
++
++msgid "Fan Speed File"
++msgstr "Файл скорости вентилятора"
++
++msgid "Initial Speed"
++msgstr "Начальная скорость"
++
++msgid "Please enter the initial speed for fan startup."
++msgstr "Введите начальную скорость при запуске вентилятора."
++
++msgid "Max Speed"
++msgstr "Максимальная скорость"
++
++msgid "Please enter maximum fan speed."
++msgstr "Введите максимальную скорость вентилятора."
++
++msgid "Start Temperature"
++msgstr "Температура запуска"
++
++msgid "Please enter the fan start temperature."
++msgstr "Введите температуру запуска вентилятора."
++
++msgid "Current speed:"
++msgstr "Текущая скорость:"
++
++msgid "Current temperature:"
++msgstr "Текущая температура:"
+diff --git a/package/luci-app-fancontrol/po/zh_Hans/fancontrol.po b/package/luci-app-fancontrol/po/zh_Hans/fancontrol.po
+new file mode 100644
+index 00000000000..c7bdd2cb3ef
+--- /dev/null
++++ b/package/luci-app-fancontrol/po/zh_Hans/fancontrol.po
+@@ -0,0 +1,41 @@
++msgid "Fan Control"
++msgstr "风扇控制"
++
++msgid "Settings"
++msgstr "设置"
++
++msgid "Enable"
++msgstr "开启"
++
++msgid "Thermal File"
++msgstr "温度文件"
++
++msgid "Fan File"
++msgstr "风扇控制"
++
++msgid "Fan Speed File"
++msgstr "风扇速度虚拟文件"
++
++msgid "Initial Speed"
++msgstr "初始速度"
++
++msgid "Please enter the initial speed for fan startup."
++msgstr "请输入风扇启动的初始速度。"
++
++msgid "Max Speed"
++msgstr "最大速度"
++
++msgid "Please enter maximum fan speed."
++msgstr "请输入风扇最大速度"
++
++msgid "Start Temperature"
++msgstr "启动温度"
++
++msgid "Please enter the fan start temperature."
++msgstr "请输入风扇启动温度。"
++
++msgid "Current speed:"
++msgstr "当前速度："
++
++msgid "Current temperature:"
++msgstr "当前温度："
+diff --git a/package/luci-app-fancontrol/root/usr/share/luci/menu.d/luci-app-fancontrol.json b/package/luci-app-fancontrol/root/usr/share/luci/menu.d/luci-app-fancontrol.json
+new file mode 100644
+index 00000000000..d068b3d35fb
+--- /dev/null
++++ b/package/luci-app-fancontrol/root/usr/share/luci/menu.d/luci-app-fancontrol.json
+@@ -0,0 +1,13 @@
++{
++	"admin/services/fancontrol": {
++		"title": "Fan Control",
++		"order": 90,
++		"action": {
++			"type": "view",
++			"path": "fancontrol"
++		},
++		"depends": {
++			"acl": [ "luci-app-fancontrol" ]
++		}
++	}
++}
+\ No newline at end of file
+diff --git a/package/luci-app-fancontrol/root/usr/share/rpcd/acl.d/luci-app-fancontrol.json b/package/luci-app-fancontrol/root/usr/share/rpcd/acl.d/luci-app-fancontrol.json
+new file mode 100644
+index 00000000000..f3bb9210bd0
+--- /dev/null
++++ b/package/luci-app-fancontrol/root/usr/share/rpcd/acl.d/luci-app-fancontrol.json
+@@ -0,0 +1,28 @@
++{
++	"luci-app-fancontrol": {
++		"description": "Fan Control",
++		"read": {
++			"uci": [
++				"fancontrol"
++			],
++			"file": {
++				"/sys/class/thermal/*/*": [
++					"read"
++				],
++				"/sys/class/hwmon/*/pwm*": [
++					"read"
++				]
++			}
++		},
++		"write": {
++			"uci": [
++				"fancontrol"
++			],
++			"file": {
++				"/sys/class/hwmon/*/pwm*": [
++					"write"
++				]
++			}
++		}
++	}
++}
+\ No newline at end of file
+diff --git a/target/linux/mediatek/patches-6.6/998-add-mt5700.patch b/target/linux/mediatek/patches-6.6/998-add-mt5700.patch
+new file mode 100644
+index 00000000000..299e91c8ffe
+--- /dev/null
++++ b/target/linux/mediatek/patches-6.6/998-add-mt5700.patch
+@@ -0,0 +1,32 @@
++From 9f08ee7f19ed8ab3f749810535a3f07d82ab41fe Mon Sep 17 00:00:00 2001
++From: gfuzan <gfuzan@163.com>
++Date: Tue, 29 Jul 2025 22:21:22 +0800
++
++diff --git a/drivers/usb/serial/option.c b/drivers/usb/serial/option.c
++index 6c6387d39db8..406cab6d8c92 100644
++--- a/drivers/usb/serial/option.c
+++++ b/drivers/usb/serial/option.c
++@@ -48,6 +48,7 @@ static void option_release(struct usb_serial *serial);
++ static void option_instat_callback(struct urb *urb);
++ 
++ /* Vendor and product IDs */
+++#define TDTECH_VENDOR_ID			0x3466
++ #define OPTION_VENDOR_ID			0x0AF0
++ #define OPTION_PRODUCT_COLT			0x5000
++ #define OPTION_PRODUCT_RICOLA			0x6000
++@@ -639,6 +640,12 @@ static void option_instat_callback(struct urb *urb);
++ 
++ 
++ static const struct usb_device_id option_ids[] = {
+++	{ USB_VENDOR_AND_INTERFACE_INFO(TDTECH_VENDOR_ID, 0xff, 0x06, 0x10) },
+++	{ USB_VENDOR_AND_INTERFACE_INFO(TDTECH_VENDOR_ID, 0xff, 0x06, 0x12) },
+++	{ USB_VENDOR_AND_INTERFACE_INFO(TDTECH_VENDOR_ID, 0xff, 0x06, 0x13) },
+++	{ USB_VENDOR_AND_INTERFACE_INFO(TDTECH_VENDOR_ID, 0xff, 0x06, 0x14) },
+++	{ USB_VENDOR_AND_INTERFACE_INFO(TDTECH_VENDOR_ID, 0xff, 0x06, 0x1B) },
+++	{ USB_VENDOR_AND_INTERFACE_INFO(TDTECH_VENDOR_ID, 0xff, 0x06, 0x1C) },
++ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_COLT) },
++ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA) },
++ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA_LIGHT) },
++-- 
++2.50.1
++
+diff --git a/target/linux/mediatek/patches-6.6/998-pwm-fan-fix.patch b/target/linux/mediatek/patches-6.6/998-pwm-fan-fix.patch
+new file mode 100644
+index 00000000000..1d0583685ce
+--- /dev/null
++++ b/target/linux/mediatek/patches-6.6/998-pwm-fan-fix.patch
+@@ -0,0 +1,45 @@
++From 9f08ee7f19ed8ab3f749810535a3f07d82ab41fe Mon Sep 17 00:00:00 2001
++From: gfuzan <gfuzan@163.com>
++Date: Tue, 29 Jul 2025 22:21:21 +0800
++
++diff --git a/drivers/hwmon/pwm-fan.c b/drivers/hwmon/pwm-fan.c
++index b67bc9e833c0..614b675c0de2 100644
++--- a/drivers/hwmon/pwm-fan.c
+++++ b/drivers/hwmon/pwm-fan.c
++@@ -50,6 +50,7 @@
++ 	struct pwm_fan_tach *tachs;
++ 	ktime_t sample_start;
++ 	struct timer_list rpm_timer;
+++	struct timer_list init_timer;
++ 
++ 	unsigned int pwm_value;
++ 	unsigned int pwm_fan_state;
++@@ -474,7 +475,6 @@
++ 
++ static int pwm_fan_probe(struct platform_device *pdev)
++ {
++-	struct thermal_cooling_device *cdev;
++ 	struct device *dev = &pdev->dev;
++ 	struct pwm_fan_ctx *ctx;
++ 	struct device *hwmon;
++@@ -627,19 +627,7 @@
++ 		return ret;
++ 
++ 	ctx->pwm_fan_state = ctx->pwm_fan_max_state;
++-	if (IS_ENABLED(CONFIG_THERMAL)) {
++-		cdev = devm_thermal_of_cooling_device_register(dev,
++-			dev->of_node, "pwm-fan", ctx, &pwm_fan_cooling_ops);
++-		if (IS_ERR(cdev)) {
++-			ret = PTR_ERR(cdev);
++-			dev_err(dev,
++-				"Failed to register pwm-fan as cooling device: %d\n",
++-				ret);
++-			return ret;
++-		}
++-		ctx->cdev = cdev;
++-	}
++-
+++	set_pwm(ctx, 0);
++ 	return 0;
++ }
++ 

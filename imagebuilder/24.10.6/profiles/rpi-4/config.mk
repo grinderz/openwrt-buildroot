@@ -1,0 +1,33 @@
+CONFIG_TARGET := bcm27xx
+CONFIG_SUBTARGET := bcm2711
+CONFIG_PROFILE := rpi-4
+CONFIG_BASE_PKGS := base-files bcm27xx-gpu-fw bcm27xx-utils ca-bundle dnsmasq dropbear e2fsprogs firewall4 fstools kmod-fs-vfat kmod-nft-offload kmod-nls-cp437 kmod-nls-iso8859-1 kmod-sound-arm-bcm2835 kmod-sound-core kmod-usb-hid libc libgcc libustream-mbedtls logd mkf2fs mtd netifd nftables odhcp6c odhcpd-ipv6only opkg partx-utils ppp ppp-mod-pppoe procd-ujail uci uclient-fetch urandom-seed cypress-firmware-43455-sdio brcmfmac-nvram-43455-sdio kmod-brcmfmac wpad-basic-mbedtls kmod-i2c-bcm2835 kmod-spi-bcm2835 kmod-spi-bcm2835-aux kmod-i2c-brcmstb kmod-usb-net-lan78xx kmod-r8169 iwinfo luci
+
+CONFIG_CUSTOM_PKGS := \
+	iperf3 \
+	luci-app-attendedsysupgrad \
+	luci-app-statistics \
+	luci-app-temp-status \
+	owut \
+	htop \
+	irqbalance \
+	terminfo \
+	usbutils \
+	tmux \
+	blkid \
+	lsblk \
+	smartmontools \
+	hdparm \
+	collectd \
+	collectd-mod-cpu \
+	collectd-mod-load \
+	collectd-mod-memory \
+	collectd-mod-thermal \
+	collectd-mod-sensors \
+	curl \
+	wget \
+	diffutils \
+	iw \
+	iwinfo \
+	tree \
+	lm-sensors

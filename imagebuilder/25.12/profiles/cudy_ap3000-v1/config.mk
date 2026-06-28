@@ -5,5 +5,6 @@ CONFIG_BASE_PKGS := apk-mbedtls base-files ca-bundle dnsmasq dropbear firewall4 
 
 CONFIG_CUSTOM_PKGS := \
 	iperf3 \
+	lm-sensors \
 	ethtool-full \
 	mdio-tools

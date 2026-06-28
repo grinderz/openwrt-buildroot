@@ -1,0 +1,31 @@
+# Put your custom commands here that should be executed once
+# the system init finished. By default this file does nothing.
+
+CLASH_DIR="/opt/clash"
+CLASH_TMPFS="/tmp/clash"
+CACHE_LINK="${CLASH_DIR}/cache.db"
+CACHE_TMPFS="${CLASH_TMPFS}/cache.db"
+
+setup_clash_cache_directories() {
+        if [ ! -d "$CLASH_TMPFS" ]; then
+                if ! mkdir -p "$CLASH_TMPFS"; then
+                        echo "ERROR: Failed to create directory $CLASH_TMPFS"
+                        return 1
+                fi
+                echo "Created directory '$CLASH_TMPFS'"
+        fi
+        if [ ! -L "$CACHE_LINK" ] || [ "$(readlink "$CACHE_LINK")" != "$CACHE_TMPFS" ]; then
+                rm -rf "$CACHE_LINK"
+                if ! ln -s "$CACHE_TMPFS" "$CACHE_LINK"; then
+                        echo "ERROR: Failed to create symlink from '$CACHE_TMPFS' to '$CACHE_LINK'"
+                        return 1
+                fi
+                echo "Created symlink from '$CACHE_TMPFS' to '$CACHE_LINK'"
+        fi
+
+        return 0
+}
+
+setup_clash_cache_directories
+
+exit 0

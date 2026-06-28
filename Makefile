@@ -10,19 +10,26 @@ GID := $(shell id -g)
 export GID
 
 
-# release tag 24.10.5
-#OWRT_VERSION_MAJOR_MINOR := 24.10
-#OWRT_VERSION_PATCH := 5
+# release tag 24.10.6
+OWRT_VERSION_MAJOR_MINOR := 24.10
+OWRT_VERSION_PATCH := 6
 #OWRT_BRANCH :=
 #OWRT_DIR := openwrt
 #SRC_OWRT_GIT := https://git.openwrt.org/openwrt/openwrt.git
 
+# release branch 24.10, custom branch
+#OWRT_VERSION_MAJOR_MINOR := 24.10
+#OWRT_VERSION_PATCH :=
+#OWRT_BRANCH := cudy-ap3000-motorcomm-24.10
+#OWRT_DIR := openwrt-24.10-cudy-ap3000-motorcomm
+#SRC_OWRT_GIT := https://github.com/grinderz/openwrt.git
+
 # release branch 25.12
-OWRT_VERSION_MAJOR_MINOR := 25.12
-OWRT_VERSION_PATCH :=
-OWRT_BRANCH :=
-OWRT_DIR := openwrt-25.12
-SRC_OWRT_GIT := https://git.openwrt.org/openwrt/openwrt.git
+#OWRT_VERSION_MAJOR_MINOR := 25.12
+#OWRT_VERSION_PATCH :=
+#OWRT_BRANCH :=
+#OWRT_DIR := openwrt-25.12
+#SRC_OWRT_GIT := https://git.openwrt.org/openwrt/openwrt.git
 
 # master
 #OWRT_VERSION_MAJOR_MINOR := master
@@ -34,17 +41,24 @@ SRC_OWRT_GIT := https://git.openwrt.org/openwrt/openwrt.git
 # master custom branch
 #OWRT_VERSION_MAJOR_MINOR := master
 #OWRT_VERSION_PATCH :=
-#OWRT_BRANCH := cudy-ap3000-motorcomm
-#OWRT_DIR := openwrt-cudy-ap3000-motorcomm
+#OWRT_BRANCH := bugfix/cudy-m3000-just-reset
+#OWRT_BRANCH := almond3s
+#OWRT_DIR := openwrt-cudy-m3000-just-reset
+#OWRT_DIR := openwrt-almond3s
+#SRC_OWRT_GIT := https://github.com/JakubVanek/openwrt.git
 #SRC_OWRT_GIT := https://github.com/grinderz/openwrt.git
 
 # orangepi-zero3
 #SRC_TARGET := sunxi
 #SRC_SUBTARGET := cortexa53
 
-SRC_TARGET := mediatek
-SRC_SUBTARGET := filogic
+SRC_TARGET := ramips
+SRC_SUBTARGET := mt7621
 
+#SRC_TARGET := mediatek
+#SRC_SUBTARGET := filogic
+
+OWRT_BRANCH_SAFE := $(subst /,-,$(OWRT_BRANCH))
 OWRT_GET_VER_SCRIPT := scripts/getver.sh
 OWRT_GIT_VERSION_FILE := version
 OWRT_GIT_VERSION := $(shell cat $(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE) 2>/dev/null || echo unknown)
@@ -58,23 +72,31 @@ ifeq ($(OWRT_VERSION_MAJOR_MINOR), master)
 
 	ifeq ($(OWRT_BRANCH),)
 		GIT_REF := $(OWRT_VERSION_MAJOR_MINOR)
-		IMG_BUILDER_IMAGE_TAG := $(OWRT_VERSION_MAJOR_MINOR)
 		OWRT_VERSION := $(OWRT_VERSION_MAJOR_MINOR)-$(OWRT_GIT_VERSION)
+		IMG_BUILDER_IMAGE_TAG := $(GIT_REF)
 	else
 		GIT_REF := $(OWRT_BRANCH)
-		IMG_BUILDER_IMAGE_TAG := $(OWRT_BRANCH)
-		OWRT_VERSION := $(OWRT_BRANCH)-$(OWRT_GIT_VERSION)
+		OWRT_VERSION := $(OWRT_BRANCH_SAFE)-$(OWRT_GIT_VERSION)
+		IMG_BUILDER_IMAGE_TAG := $(OWRT_BRANCH_SAFE)
 	endif
+
 else
 	ifeq ($(OWRT_VERSION_PATCH),)
 		OWRT_DOWNLOAD_AREA_PATH := releases/$(OWRT_VERSION_MAJOR_MINOR)-SNAPSHOT
-		GIT_REF := openwrt-$(OWRT_VERSION_MAJOR_MINOR)
 		MANIFEST_VERSION := $(OWRT_VERSION_MAJOR_MINOR)-snapshot-$(OWRT_GIT_VERSION)
-		IMG_BUILDER_IMAGE_TAG := $(GIT_REF)
 		IMG_BUILDER_FILE_VERSION := $(OWRT_VERSION_MAJOR_MINOR)-SNAPSHOT
-		OWRT_VERSION := $(OWRT_VERSION_MAJOR_MINOR)-$(OWRT_GIT_VERSION)
 		CONFIG_DIR_VERSION := $(OWRT_VERSION_MAJOR_MINOR)
 		VALIDATE_VERMAGIC := 0
+
+		ifeq ($(OWRT_BRANCH),)
+			GIT_REF := openwrt-$(OWRT_VERSION_MAJOR_MINOR)
+			OWRT_VERSION := $(OWRT_VERSION_MAJOR_MINOR)-$(OWRT_GIT_VERSION)
+		else
+			GIT_REF := $(OWRT_BRANCH)
+			OWRT_VERSION := $(OWRT_BRANCH_SAFE)-$(OWRT_GIT_VERSION)
+		endif
+
+		IMG_BUILDER_IMAGE_TAG := $(GIT_REF)
 	else
 		OWRT_DOWNLOAD_AREA_PATH := releases/$(OWRT_VERSION_MAJOR_MINOR).$(OWRT_VERSION_PATCH)
 		GIT_REF := v$(OWRT_VERSION_MAJOR_MINOR).$(OWRT_VERSION_PATCH)
@@ -162,7 +184,7 @@ info:
 
 define Img/Make
     @echo " - docker make image"
-	docker run --rm --user root -v "./$(IMG_TMP_DIR)/":/builder/bin -i $(CONFIG_DOCKER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) /bin/bash << EOT
+	docker run --pull=always --rm --user root -v "./$(IMG_TMP_DIR)/":/builder/bin -i $(CONFIG_DOCKER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) /bin/bash << EOT
 	set -o errtrace -o pipefail -o noclobber -o errexit -o nounset
 	cleanup() {
   		chown -R $(UID):$(GID) /builder/bin
@@ -172,7 +194,7 @@ define Img/Make
 
 	make image \
 		PROFILE=$(CONFIG_PROFILE) \
-		PACKAGES="$(CONFIG_BASE_PKGS) $(CONFIG_CUSTOM_PKGS)" \
+		PACKAGES="$(CONFIG_CUSTOM_PKGS)" \
 		FILES="bin/$(IMG_FILES_DIR_NAME)" \
 		$(if $(CONFIG_ROOTFS_PARTSIZE),ROOTFS_PARTSIZE=$(CONFIG_ROOTFS_PARTSIZE))
 	EOT
@@ -437,14 +459,14 @@ src.build.config: ## Src build config
 	@echo " - generic sed line delete"
 	@for line in $(GENERIC_SED_LINE_DELETE); do
 		echo "   - processing $${line}"
-		grep -Fxq "$${line}" config.buildinfo
+		#grep -Fxq "$${line}" config.buildinfo
 		sed -i "/$${line}/d" config.buildinfo
 	done
 
 	@echo " - $(SRC_TARGET)/$(SRC_SUBTARGET) sed line delete"
 	@for line in $(CONFIG_SED_LINE_DELETE); do
 		echo "   - processing $${line}"
-		grep -Fq "$${line}" config.buildinfo
+		#grep -Fq "$${line}" config.buildinfo
 		sed -i "/$${line}/d" config.buildinfo
 	done
 
@@ -466,6 +488,14 @@ src.build.config: ## Src build config
 
 	cp config.buildinfo $(OWRT_DIR)/.config
 	MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) defconfig
+
+.PHONY: src.download.config
+src.download.config: ## Src download config info
+	curl -s $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.buildinfo
+
+.PHONY: src.download.version
+src.download.version: ## Src download version info
+	curl -s $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/version.buildinfo
 
 .PHONY: src.download.vermagic
 src.download.vermagic: ## Src download vermagic info
@@ -544,5 +574,3 @@ src.all: src.check.umask src.install.feeds _src.all.base ## Src all
 
 .PHONY: src.all.nofeeds
 src.all.nofeeds: src.check.umask _src.all.base  ## Src all wo feeds
-
-# validae regdb
