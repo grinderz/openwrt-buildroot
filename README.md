@@ -3,6 +3,87 @@
 # Requirements
 
 - make >= 4.4.x
+- tar, zstd (artifact archiving)
+- wget, curl, jq, rsync, quilt
+- docker with compose plugin (imagebuilder, sdk, asu targets)
+
+# Usage
+
+Version is selected via `OWRT_RELEASE` (default `24.10.7`), one file per version
+in `versions/`. Source target/subtarget via `SRC_TARGET`/`SRC_SUBTARGET`
+(default `ramips/mt7621`):
+
+```
+make info OWRT_RELEASE=master
+make info SRC_TARGET=mediatek SRC_SUBTARGET=filogic
+make src.clone OWRT_RELEASE=master-almond3s
+make src.all SRC_TARGET=mediatek SRC_SUBTARGET=filogic
+make img.profile.rpi-4
+make pkg.<package>              # build a package with the official openwrt/sdk image
+make pkg.htop SRC_TARGET=mediatek SRC_SUBTARGET=filogic
+make pkg.sdk.<package>          # build a package with the SDK from src build, results in artifacts/pkg/
+```
+
+Persistent selection: `export OWRT_RELEASE=... SRC_TARGET=... SRC_SUBTARGET=...`
+(e.g. in `.envrc`).
+
+## Targets used in this project
+
+| `SRC_TARGET/SRC_SUBTARGET` | srcbuilder configs | imagebuilder profiles / devices |
+|----------------------------|--------------------|---------------------------------|
+| `ramips/mt7621` (default)  | 24.10.7, 25.12.5, master | asus_rt-n56u-b1; securifi_almond-3s (24.10.7/25.12.5 via patch, master); device: — |
+| `mediatek/filogic`         | 24.10, 24.10.7, 25.12, 25.12.5, master | cudy_ap3000-v1, cudy_m3000-v1, cudy_m3000-v2-yt8821 (master), cudy_tr3000-256mb-v1, cudy_tr3000-v1-ubootmod, xiaomi_mi-router-ax3000t-ubootmod; device: rtr1-gl-mt6000 |
+| `bcm27xx/bcm2710`          | 24.10.7            | rpi-3; device: nut-rpi-3 |
+| `bcm27xx/bcm2711`          | 24.10.7            | rpi-4 |
+| `bcm47xx/mips74k`          | 24.10.7            | netgear_wnr3500l-v1-na |
+| `rockchip/armv8`           | 24.10.7            | friendlyarm_nanopi-r3s |
+| `sunxi/cortexa53`          | 24.10.7            | xunlong_orangepi-zero3 |
+| `x86/64`                   | 24.10.7            | generic; device: generic-lec-7233 |
+
+# Custom feeds / repositories
+
+- src build: `srcbuilder/common/feeds-extra.conf` (or per-version
+  `srcbuilder/<version>/feeds-extra.conf`) is appended to `feeds.conf.default`
+  by `src.install.feeds`. See `feeds-extra.conf.example`.
+- imagebuilder: `repositories-extra.conf` in `imagebuilder/<version>/`,
+  `.../profiles/<name>/` or `.../devices/<name>/` is appended to
+  `repositories.conf` inside the container (signature check is disabled when
+  custom repos are present).
+- sdk: `sdkbuilder/feeds-extra.conf` is appended to `feeds.conf.default`
+  inside the SDK container.
+- asu: `repository_allow_list` in `asu/asu.toml` whitelists external repo URL
+  prefixes for client build requests.
+
+SDK archive is produced by the src build (`CONFIG_SDK=y`) and stored next to the
+imagebuilder archive in `artifacts/src/<version>/`. `pkg.sdk.%` builds the SDK
+docker image from it, then compiles the package from feeds. Local package
+sources placed in `sdkbuilder/packages/<name>/` are mounted into the SDK and
+take precedence over feeds.
+
+# ASU server
+
+Self-hosted [attended sysupgrade server](https://github.com/openwrt/asu) for
+`owut` / `luci-app-attendedsysupgrade`, API on `http://<host>:8000` (bound to
+all interfaces so routers can reach it; `allow_defaults = true` in `asu.toml`
+lets any LAN client submit arbitrary uci-defaults — keep it on a trusted
+network):
+
+```
+make asu.up                             # official ghcr.io/openwrt/imagebuilder images
+make asu.src.up                         # src-built imagebuilder images
+make asu.custom.up                      # src imagebuilder + own metadata (custom devices)
+make asu.meta.publish                   # publish src profiles/packages metadata
+make asu.push.device.rtr1-gl-mt6000     # publish src imagebuilder image to the ASU registry
+make asu.push.profile.<name>
+make asu.logs
+make asu.down
+```
+
+asu always pulls the imagebuilder image, so `asu.src.up` mode uses a local
+registry inside the compose project: build the image (`img.src.*`), then
+`asu.push.*` tags and pushes it. Config: `asu/asu.toml`. Requested version maps
+to image tag as `24.10.7 -> v24.10.7`, `24.10-SNAPSHOT -> openwrt-24.10`,
+`SNAPSHOT -> master` -- same scheme the img targets already use.
 
 # TODO
 
@@ -20,11 +101,10 @@
 - https://github.com/koshev-msk/modemfeed
 - s3 securify https://4pda.to/forum/index.php?showtopic=1085698&view=findpost&p=137406633 https://ssclash.notion.site/ZRAM-20a89188f6b4809aa3d4f4297356a27f
 - replace mtk firmware https://forum.openwrt.org/t/retired-thread-gl-inet-flint-2-gl-mt6000-snapshot-experimental-bleeding-edge/197278/39
-- build pkg action https://github.com/zerolabnet/SSClash/blob/main/.github/workflows/build.ym
+- build pkg action https://github.com/zerolabnet/SSClash/blob/main/.github/workflows/build.yml
 - https://github.com/vernette/beszel-agent-openwrt/blob/master/.github/workflows/build-package.yml
 - https://github.com/bigmalloy/luci-app-fancontrol
 - https://github.com/Slava-Shchipunov/awg-openwrt
-- https://github.com/bigmalloy/luci-app-fancontrol
 - Vermagic cat build_dir/target-*/linux-*/linux-*/.vermagic
 
 # Repos
@@ -60,7 +140,6 @@
 # Patch
 
 - huasifei_wh3000 fancontrol https://github.com/padavanonly/immortalwrt-mt798x-6.6/pull/211
-- 
 
 # Checklists
 

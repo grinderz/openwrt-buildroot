@@ -1,0 +1,5 @@
+# Extra feeds appended to feeds.conf.default inside the SDK container.
+# Activate: cp feeds-extra.conf.example feeds-extra.conf
+#
+#src-git modemfeed https://github.com/koshev-msk/modemfeed.git
+#src-git fantastic https://github.com/fantastic-packages/packages.git;24.10

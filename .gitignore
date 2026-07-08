@@ -4,3 +4,7 @@
 artifacts/
 openwrt/
 openwrt-*/
+.ccache/
+asu/public/
+asu/metadata/
+config.buildinfo*

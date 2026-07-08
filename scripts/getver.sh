@@ -17,6 +17,16 @@ try_git() {
 
   [ -n "$GET_REV" ] || GET_REV="HEAD"
 
+  # shallow clone (src.clone --depth 1): REBOOT is outside the fetched history,
+  # so rev-list counting silently yields a bogus r0-<hash>; use the plain
+  # commit hash instead
+  if ! git cat-file -e "${REBOOT}" 2>/dev/null; then
+    REV="$(git log -n 1 --abbrev=${HASH_LENGTH} --no-show-signature --format="%h" HEAD)"
+    REV="${REV:+g$REV}"
+    [ -n "$REV" ]
+    return
+  fi
+
   case "$GET_REV" in
   r*)
     GET_REV="$(echo $GET_REV | tr -d 'r')"

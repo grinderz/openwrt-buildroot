@@ -1,0 +1,92 @@
+---
+
+services:
+  server:
+    image: docker.io/openwrt/asu:latest
+    restart: unless-stopped
+    command: uv run uvicorn --host 0.0.0.0 asu.main:app
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      BASE_CONTAINER: ${ASU_BASE_CONTAINER:-ghcr.io/openwrt/imagebuilder}
+      UPSTREAM_URL: ${ASU_UPSTREAM_URL:-https://downloads.openwrt.org}
+    volumes:
+      - ./asu.toml:/app/asu.toml:ro
+      - ./public/store:/public/store:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  worker:
+    image: docker.io/openwrt/asu:latest
+    restart: unless-stopped
+    # asu hardcodes the socket path, symlink it to the shared volume
+    command: sh -c 'ln -sf /sock/podman.sock /var/podman.sock && exec uv run rqworker --logging_level INFO'
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      BASE_CONTAINER: ${ASU_BASE_CONTAINER:-ghcr.io/openwrt/imagebuilder}
+      UPSTREAM_URL: ${ASU_UPSTREAM_URL:-https://downloads.openwrt.org}
+    volumes:
+      - ./asu.toml:/app/asu.toml:ro
+      - ./public:/public:rw
+      - podman-sock:/sock
+    depends_on:
+      - redis
+      - podman
+
+  podman:
+    image: quay.io/podman/stable:latest
+    restart: unless-stopped
+    privileged: true
+    user: root
+    # asu-build: isolated network for build containers (asu expects it to exist).
+    # asu-cache: nginx caching proxy for package downloads, started inside
+    # podman so build containers on asu-build reach it as http://asu-cache
+    # (a compose service would not be resolvable from nested podman containers).
+    command:
+      - sh
+      - -c
+      - |
+        podman network exists asu-build || podman network create asu-build
+        podman run -d --replace --name asu-cache --network asu-build \
+          -v /asu/nginx-cache.conf:/etc/nginx/conf.d/default.conf:ro \
+          -v asu-cache-data:/var/cache/nginx \
+          docker.io/library/nginx:alpine \
+          || echo "warning: asu-cache failed to start"
+        exec podman system service --time=0 unix:///sock/podman.sock
+    volumes:
+      - podman-sock:/sock
+      - podman-storage:/var/lib/containers
+      - ./registries.conf:/etc/containers/registries.conf.d/asu.conf:ro
+      - ./nginx-cache.conf:/asu/nginx-cache.conf:ro
+
+  # static metadata for custom devices absent from downloads.openwrt.org:
+  # .versions.json, .targets.json, targets/*/profiles.json, package indexes.
+  # Populated by `make asu.meta.publish`, used when UPSTREAM_URL=http://metadata
+  metadata:
+    image: docker.io/library/nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./metadata:/usr/share/nginx/html:ro
+
+  redis:
+    image: docker.io/redis/redis-stack-server:latest
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  # local registry: asu always pulls the imagebuilder image, so src-built
+  # images are pushed here (host: localhost:5001, compose net: registry:5000)
+  registry:
+    image: docker.io/library/registry:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+
+volumes:
+  podman-sock:
+  podman-storage:
+  redis-data:
+  registry-data:

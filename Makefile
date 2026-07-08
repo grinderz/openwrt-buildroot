@@ -1,5 +1,8 @@
 MAKEFLAGS += --warn-undefined-variables
 
+# this Makefile is an orchestrator: target order matters, parallelism lives in sub-makes
+.NOTPARALLEL:
+
 .ONESHELL:
 .SHELLFLAGS := -o errtrace -o pipefail -o noclobber -o errexit -o nounset -c
 SHELL := bash
@@ -10,53 +13,22 @@ GID := $(shell id -g)
 export GID
 
 
-# release tag 24.10.6
-OWRT_VERSION_MAJOR_MINOR := 24.10
-OWRT_VERSION_PATCH := 6
-#OWRT_BRANCH :=
-#OWRT_DIR := openwrt
-#SRC_OWRT_GIT := https://git.openwrt.org/openwrt/openwrt.git
+# version selection: make OWRT_RELEASE=<name> ... where versions/<name>.mk exists
+OWRT_RELEASE ?= 24.10.7
+ifeq ($(wildcard versions/$(OWRT_RELEASE).mk),)
+    $(error unknown OWRT_RELEASE '$(OWRT_RELEASE)', available: $(basename $(notdir $(wildcard versions/*.mk))))
+endif
+include versions/$(OWRT_RELEASE).mk
 
-# release branch 24.10, custom branch
-#OWRT_VERSION_MAJOR_MINOR := 24.10
-#OWRT_VERSION_PATCH :=
-#OWRT_BRANCH := cudy-ap3000-motorcomm-24.10
-#OWRT_DIR := openwrt-24.10-cudy-ap3000-motorcomm
-#SRC_OWRT_GIT := https://github.com/grinderz/openwrt.git
+# src target selection, override from CLI:
+#   make src.all SRC_TARGET=mediatek SRC_SUBTARGET=filogic
+SRC_TARGET ?= ramips
+SRC_SUBTARGET ?= mt7621
 
-# release branch 25.12
-#OWRT_VERSION_MAJOR_MINOR := 25.12
-#OWRT_VERSION_PATCH :=
-#OWRT_BRANCH :=
-#OWRT_DIR := openwrt-25.12
-#SRC_OWRT_GIT := https://git.openwrt.org/openwrt/openwrt.git
-
-# master
-#OWRT_VERSION_MAJOR_MINOR := master
-#OWRT_VERSION_PATCH :=
-#OWRT_BRANCH :=
-#OWRT_DIR := openwrt-master
-#SRC_OWRT_GIT := https://github.com/openwrt/openwrt.git
-
-# master custom branch
-#OWRT_VERSION_MAJOR_MINOR := master
-#OWRT_VERSION_PATCH :=
-#OWRT_BRANCH := bugfix/cudy-m3000-just-reset
-#OWRT_BRANCH := almond3s
-#OWRT_DIR := openwrt-cudy-m3000-just-reset
-#OWRT_DIR := openwrt-almond3s
-#SRC_OWRT_GIT := https://github.com/JakubVanek/openwrt.git
-#SRC_OWRT_GIT := https://github.com/grinderz/openwrt.git
-
-# orangepi-zero3
-#SRC_TARGET := sunxi
-#SRC_SUBTARGET := cortexa53
-
-SRC_TARGET := ramips
-SRC_SUBTARGET := mt7621
-
-#SRC_TARGET := mediatek
-#SRC_SUBTARGET := filogic
+# optional vars from version files; src targets are guarded below
+OWRT_BRANCH ?=
+OWRT_DIR ?=
+SRC_OWRT_GIT ?=
 
 OWRT_BRANCH_SAFE := $(subst /,-,$(OWRT_BRANCH))
 OWRT_GET_VER_SCRIPT := scripts/getver.sh
@@ -115,11 +87,15 @@ ARTIFACTS_DIR := artifacts
 
 SRC_DIR := srcbuilder/$(CONFIG_DIR_VERSION)
 SRC_TARGETS_DIR := $(SRC_DIR)/targets
+# per-version generic config wins over the shared one
+SRC_GENERIC_CONFIG := $(firstword $(wildcard $(SRC_TARGETS_DIR)/generic/config.mk) srcbuilder/common/generic.mk)
+# optional custom feeds appended to feeds.conf.default; per-version wins
+SRC_FEEDS_EXTRA := $(firstword $(wildcard $(SRC_DIR)/feeds-extra.conf) $(wildcard srcbuilder/common/feeds-extra.conf))
 SRC_CONFIG_URL := $(OWRT_TARGETS_URL)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.buildinfo
 SRC_QUILT_PATCHES := ../$(SRC_DIR)/patches
 
 SRC_ARTIFACTS_DIR := $(ARTIFACTS_DIR)/src/$(CONFIG_DIR_VERSION)
-SRC_ARTIFACTS_ARCHIVE_FILE := openwrt-$(OWRT_VERSION)-$(SRC_TARGET)-$(SRC_SUBTARGET)-$$(date +%F).7z
+SRC_ARTIFACTS_ARCHIVE_FILE := openwrt-$(OWRT_VERSION)-$(SRC_TARGET)-$(SRC_SUBTARGET)-$$(date +%F).tar.zst
 SRC_BINARY_TARGETS_DIR := $(OWRT_DIR)/bin/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)
 SRC_IMG_BUILDER_FILE := openwrt-imagebuilder-$(addsuffix -,$(IMG_BUILDER_FILE_VERSION))$(SRC_TARGET)-$(SRC_SUBTARGET).Linux-x86_64.tar.zst
 
@@ -127,13 +103,49 @@ IMG_BUILDER_IMAGE := quay.io/openwrt/imagebuilder
 
 IMG_DIR := imagebuilder/$(CONFIG_DIR_VERSION)
 IMG_ARTIFACTS_DIR := $(ARTIFACTS_DIR)/img/$(CONFIG_DIR_VERSION)
-IMG_TMP_DIR := $(IMG_ARTIFACTS_DIR)/tmp/$(CONFIG_DIR_VERSION)
+IMG_TMP_DIR := $(IMG_ARTIFACTS_DIR)/tmp
 IMG_FILES_DIR_NAME := files
 IMG_GENERIC_FILES_DIR := $(IMG_DIR)/$(IMG_FILES_DIR_NAME)
 
 IMG_SRC_BUILDER_IMAGE ?= varch/openwrt-imagebuilder
 
+SDK_IMAGE := quay.io/openwrt/sdk
+SDK_BUILDER_IMAGE ?= varch/openwrt-sdkbuilder
+SDK_FILE_PATTERN := openwrt-sdk-*$(SRC_TARGET)-$(SRC_SUBTARGET)_*.Linux-x86_64.tar.zst
+SDK_LOCAL_PKGS_DIR := sdkbuilder/packages
+SDK_FEEDS_EXTRA := sdkbuilder/feeds-extra.conf
+
+PKG_ARTIFACTS_DIR := $(ARTIFACTS_DIR)/pkg/$(CONFIG_DIR_VERSION)
+PKG_TMP_DIR := $(PKG_ARTIFACTS_DIR)/tmp
+
 ARGS ?=
+
+# archive contents are mostly pre-compressed, so a low zstd level is enough
+ARCHIVE_ZSTD_OPTS ?= -T0 -3
+
+# defaults for optional profile/device config.mk vars and target-specific vars,
+# so --warn-undefined-variables stays quiet on configs that do not set them
+CONFIG_DEVICE ?=
+CONFIG_ROOTFS_PARTSIZE ?=
+CONFIG_KERNEL_VERMAGIC ?=
+CONFIG_DOCKER_IMAGE ?=
+CONFIG_DOCKER_PULL ?=
+CONFIG_BUILDER_TYPE ?=
+SDK_DOCKER_IMAGE ?=
+SDK_DOCKER_PULL ?=
+
+# guard: src targets (except src.docker.*) need OWRT_DIR from a version file
+SRC_GUARDED_GOALS := $(filter-out src.docker.%,$(filter src.% _src.% asu.meta.%,$(MAKECMDGOALS)))
+ifneq ($(SRC_GUARDED_GOALS),)
+    ifeq ($(OWRT_DIR),)
+        $(error OWRT_DIR is not set: define it in versions/$(OWRT_RELEASE).mk)
+    endif
+    ifneq ($(filter src.clone,$(SRC_GUARDED_GOALS)),)
+        ifeq ($(SRC_OWRT_GIT),)
+            $(error SRC_OWRT_GIT is not set: define it in versions/$(OWRT_RELEASE).mk)
+        endif
+    endif
+endif
 
 
 ##@ General
@@ -150,14 +162,14 @@ ARGS ?=
 # More info on the awk command:
 # http://linuxcommand.org/lc3_adv_awk.php
 
-DEFAULT_GOAL := help
+.DEFAULT_GOAL := help
 .PHONY: help
 help: ## Display this help screen
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9\-\\.%]+:.*?##/ { printf "  \033[36m%-29s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 define Setup/Vars
-	@[ -f "${1}" ] || exit 1
 	@echo " - setup vars $(1)"
+	$(if $(wildcard $(1)),,$(error config not found: $(1)))
 	$(eval include $(1))
 endef
 
@@ -165,8 +177,11 @@ endef
 ##@ Info Targets
 
 
-.PHONE: info
+.PHONY: info
 info:
+	@echo "OWRT_RELEASE: $(OWRT_RELEASE)"
+	@echo "SRC_TARGET: $(SRC_TARGET)"
+	@echo "SRC_SUBTARGET: $(SRC_SUBTARGET)"
 	@echo "OWRT_GIT_VERSION: $(OWRT_GIT_VERSION)"
 	@echo "OWRT_VERSION: $(OWRT_VERSION)"
 	@echo "OWRT_VERSION_MAJOR_MINOR: $(OWRT_VERSION_MAJOR_MINOR)"
@@ -184,13 +199,19 @@ info:
 
 define Img/Make
     @echo " - docker make image"
-	docker run --pull=always --rm --user root -v "./$(IMG_TMP_DIR)/":/builder/bin -i $(CONFIG_DOCKER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) /bin/bash << EOT
+	docker run --pull=$(CONFIG_DOCKER_PULL) --rm --user root -v "./$(IMG_TMP_DIR)/":/builder/bin -i $(CONFIG_DOCKER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) /bin/bash << EOT
 	set -o errtrace -o pipefail -o noclobber -o errexit -o nounset
 	cleanup() {
   		chown -R $(UID):$(GID) /builder/bin
 	}
 
 	trap cleanup EXIT
+
+	if [ -f bin/repositories-extra.conf ]; then
+		echo " - custom repositories"
+		cat bin/repositories-extra.conf >> repositories.conf
+		sed -i '/check_signature/d' repositories.conf
+	fi
 
 	make image \
 		PROFILE=$(CONFIG_PROFILE) \
@@ -208,27 +229,37 @@ define Img/Archive
 		exit 1
 	fi
 
-	if [ -z $$(find "$${SH_IMG_TARGETS_DIR}/" -mindepth 1 -maxdepth 1 -print -quit) ]; then
+	if [ -z "$$(find "$${SH_IMG_TARGETS_DIR}/" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
 		echo " - empty dir: $${SH_IMG_TARGETS_DIR}"
 		exit 1
 	fi
 
-	SH_ARCHIVE_NAME=openwrt-$(OWRT_VERSION)-$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(CONFIG_PROFILE)$(if $(CONFIG_DEVICE),-$(CONFIG_DEVICE))-$(CONFIG_BUILDER_TYPE)-$$(date +%F).7z
+	SH_ARCHIVE_NAME=openwrt-$(OWRT_VERSION)-$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(CONFIG_PROFILE)$(if $(CONFIG_DEVICE),-$(CONFIG_DEVICE))-$(CONFIG_BUILDER_TYPE)-$$(date +%F).tar.zst
 	@echo " - archiving: $${SH_ARCHIVE_NAME}"
 
-	pushd $(IMG_TMP_DIR)
-	7z a -mx=9 $${SH_ARCHIVE_NAME} .
-	popd
-
-	mv -f $(IMG_TMP_DIR)/$${SH_ARCHIVE_NAME} $(IMG_ARTIFACTS_DIR)/
+	tar -C $(IMG_TMP_DIR) --exclude=./repositories-extra.conf -cf - . | zstd $(ARCHIVE_ZSTD_OPTS) -f -o $(IMG_ARTIFACTS_DIR)/$${SH_ARCHIVE_NAME}
 endef
 
 define Img/Files/Copy
 	@[ -d "${1}" ] || exit 1
-	if [ -d "${1}" ] && [ -n $$(find "${1}/" -mindepth 1 -maxdepth 1 -print) ]; then
+	if [ -d "${1}" ] && [ -n "$$(find "${1}/" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
 		echo " - setup files: ${1}"
 		mkdir -p "$(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)"
 		cp -rf ${1}/* $(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)/
+	fi
+endef
+
+define Img/Repos
+	SH_REPOS_FILES=""
+	for SH_REPOS_SRC in $(IMG_DIR)/repositories-extra.conf $(IMG_DIR)/profiles/$(CONFIG_PROFILE)/repositories-extra.conf $(if $(CONFIG_DEVICE),$(IMG_DIR)/devices/$(CONFIG_DEVICE)/repositories-extra.conf); do
+		if [ -f "$${SH_REPOS_SRC}" ]; then
+			SH_REPOS_FILES="$${SH_REPOS_FILES} $${SH_REPOS_SRC}"
+		fi
+	done
+
+	if [ -n "$${SH_REPOS_FILES}" ]; then
+		echo " - custom repositories:$${SH_REPOS_FILES}"
+		cat $${SH_REPOS_FILES} >| $(IMG_TMP_DIR)/repositories-extra.conf
 	fi
 endef
 
@@ -285,7 +316,9 @@ img.clean.tmp: ## Clean tmp dir
 
 .PHONY: img.recreate.tmp
 img.recreate.tmp: img.clean.tmp ## Recreate tmp dir
-	@mkdir -p $(IMG_TMP_DIR)
+	# files dir always exists (may stay empty): Img/Make passes FILES=bin/files
+	# unconditionally and the imagebuilder fails on a missing path
+	@mkdir -p $(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)
 
 .PHONY: img.clean.artifacts
 img.clean.artifacts: ## Clean image artifacts
@@ -296,15 +329,17 @@ _img.info.%:
 
 	$(call Img/Info)
 
-_img.profile.%: $(IMG_ARTIFACTS_DIR) img.recreate.tmp
+_img.profile.%: img.recreate.tmp
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Img/Files)
+	$(call Img/Repos)
 	$(call Img/Make)
 	$(call Img/Archive)
 
-_img.device.%: $(IMG_ARTIFACTS_DIR) img.recreate.tmp
+_img.device.%: img.recreate.tmp
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Img/Files)
+	$(call Img/Repos)
 	$(call Img/Make)
 	$(call Img/Archive)
 
@@ -316,43 +351,230 @@ _img.src.build.device.%:
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Img/Builder/Docker/Build)
 
-.PHONY: img.download.pkgs.profile.%
+# note: .PHONY has no effect on pattern rules; these targets never match real files
 img.download.pkgs.profile.%:
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Img/Download/Pkgs)
 
-.PHONY: img.download.pkgs.device.%
 img.download.pkgs.device.%:
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Img/Download/Pkgs)
 
-.PHONY: img.profile.%
 img.profile.%: CONFIG_DOCKER_IMAGE := $(IMG_BUILDER_IMAGE)
+img.profile.%: CONFIG_DOCKER_PULL := always
 img.profile.%: CONFIG_BUILDER_TYPE := b
 img.profile.%: _img.profile.% ## Build image by profile
 	@echo
 
-.PHONY: img.src.profile.%
 img.src.profile.%: CONFIG_DOCKER_IMAGE := $(IMG_SRC_BUILDER_IMAGE)
+img.src.profile.%: CONFIG_DOCKER_PULL := never
 img.src.profile.%: CONFIG_BUILDER_TYPE := s
 img.src.profile.%: _img.src.build.profile.% _img.profile.% ## Build image by profile from src image builder
 	@echo
 
-.PHONY: img.info.profile.%
 img.info.profile.%: _img.info.% ## Show info from profile
 	@echo
 
-.PHONY: img.device.%
 img.device.%: CONFIG_DOCKER_IMAGE := $(IMG_BUILDER_IMAGE)
+img.device.%: CONFIG_DOCKER_PULL := always
 img.device.%: CONFIG_BUILDER_TYPE := b
 img.device.%: _img.device.% ## Build image by device
 	@echo
 
-.PHONY: img.src.device.%
 img.src.device.%: CONFIG_DOCKER_IMAGE := $(IMG_SRC_BUILDER_IMAGE)
+img.src.device.%: CONFIG_DOCKER_PULL := never
 img.src.device.%: CONFIG_BUILDER_TYPE := s
 img.src.device.%: _img.src.build.device.% _img.device.% ## Build image by device from src image builder
 	@echo
+
+
+##@ SDK Builder Targets
+
+
+define Sdk/Builder/Docker/Build
+	@if [ -z "$$(find $(SRC_ARTIFACTS_DIR) -maxdepth 1 -name '$(SDK_FILE_PATTERN)' -print -quit 2>/dev/null)" ]; then
+		echo " - sdk archive not found: $(SRC_ARTIFACTS_DIR)/$(SDK_FILE_PATTERN) (run src build first)"
+		exit 1
+	fi
+
+	@echo " - sdkbuilder docker build"
+	docker buildx build -t $(SDK_BUILDER_IMAGE):$(SRC_TARGET)-$(SRC_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) -f sdkbuilder.Dockerfile \
+		--build-arg SRC_ARTIFACTS_DIR=$(SRC_ARTIFACTS_DIR) \
+		--build-arg SRC_SDK_FILE_PATTERN=$(SDK_FILE_PATTERN) \
+		.
+endef
+
+define Sdk/Make
+	@echo " - docker make package ${1}"
+	# no --user root: the sdk is a full buildroot and refuses to compile as root;
+	# pkg.recreate.tmp opens the bin mount for the container's buildbot uid
+	docker run --pull=$(SDK_DOCKER_PULL) --rm -v "./$(PKG_TMP_DIR)/":/builder/bin $(if $(wildcard $(SDK_LOCAL_PKGS_DIR)/${1}),-v "./$(SDK_LOCAL_PKGS_DIR)/${1}":/builder/package/${1}) $(if $(wildcard $(SDK_FEEDS_EXTRA)),-v "./$(SDK_FEEDS_EXTRA)":/builder/feeds-extra.conf:ro) -i $(SDK_DOCKER_IMAGE):$(SRC_TARGET)-$(SRC_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) /bin/bash << EOT
+	set -o errtrace -o pipefail -o noclobber -o errexit -o nounset
+
+	if [ -f feeds-extra.conf ]; then
+		echo " - custom feeds"
+		cat feeds.conf.default feeds-extra.conf >| feeds.conf
+	fi
+
+	./scripts/feeds update -a
+	./scripts/feeds install ${1} || :
+	make defconfig
+	make package/${1}/compile -j\$$(nproc)
+	EOT
+endef
+
+define Pkg/Collect
+	SH_PKG_FILES=$$(find "$(PKG_TMP_DIR)" \( -name '*.ipk' -o -name '*.apk' \) -print 2>/dev/null || :)
+	if [ -z "$${SH_PKG_FILES}" ]; then
+		echo " - no packages built: $(PKG_TMP_DIR)"
+		exit 1
+	fi
+
+	echo "$${SH_PKG_FILES}" | while read -r SH_PKG_FILE; do
+		echo " - collecting: $${SH_PKG_FILE}"
+		cp -f "$${SH_PKG_FILE}" "$(PKG_ARTIFACTS_DIR)/"
+	done
+endef
+
+$(PKG_ARTIFACTS_DIR):
+	@mkdir -p $@
+
+.PHONY: pkg.clean.tmp
+pkg.clean.tmp: ## Clean pkg tmp dir
+	@rm -rf $(PKG_TMP_DIR)
+
+.PHONY: pkg.recreate.tmp
+pkg.recreate.tmp: pkg.clean.tmp ## Recreate pkg tmp dir
+	@mkdir -p $(PKG_TMP_DIR)
+	chmod 777 $(PKG_TMP_DIR)
+
+.PHONY: pkg.clean.artifacts
+pkg.clean.artifacts: ## Clean pkg artifacts
+	@rm -rf "$(PKG_ARTIFACTS_DIR)"
+
+_sdk.docker.build:
+	$(call Sdk/Builder/Docker/Build)
+
+_pkg.build.%: $(PKG_ARTIFACTS_DIR) pkg.recreate.tmp
+	$(call Sdk/Make,$*)
+	$(call Pkg/Collect)
+
+.PHONY: sdk.build
+sdk.build: _sdk.docker.build ## Build sdk builder docker image
+	@echo
+
+pkg.%: SDK_DOCKER_IMAGE := $(SDK_IMAGE)
+pkg.%: SDK_DOCKER_PULL := always
+pkg.%: _pkg.build.% ## Build package from official sdk image
+	@echo
+
+pkg.sdk.%: SDK_DOCKER_IMAGE := $(SDK_BUILDER_IMAGE)
+pkg.sdk.%: SDK_DOCKER_PULL := never
+pkg.sdk.%: _sdk.docker.build _pkg.build.% ## Build package from src sdk builder
+	@echo
+
+
+##@ ASU Server Targets
+
+
+ASU_DIR := asu
+ASU_COMPOSE := docker compose -f $(ASU_DIR)/docker-compose.yaml
+ASU_REGISTRY := localhost:5001
+ASU_BASE_CONTAINER_OFFICIAL := ghcr.io/openwrt/imagebuilder
+ASU_BASE_CONTAINER_SRC := registry:5000/$(IMG_SRC_BUILDER_IMAGE)
+ASU_UPSTREAM_OFFICIAL := https://downloads.openwrt.org
+ASU_UPSTREAM_CUSTOM := http://metadata
+ASU_META_DIR := $(ASU_DIR)/metadata
+
+define Asu/Up
+	@mkdir -p $(ASU_DIR)/public/store $(ASU_META_DIR)
+	ASU_BASE_CONTAINER=$(1) ASU_UPSTREAM_URL=$(2) $(ASU_COMPOSE) up -d
+endef
+
+define Asu/Push
+	SH_IMG_TAG=$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG)
+	docker tag "$(IMG_SRC_BUILDER_IMAGE):$${SH_IMG_TAG}" "$(ASU_REGISTRY)/$(IMG_SRC_BUILDER_IMAGE):$${SH_IMG_TAG}"
+	docker push "$(ASU_REGISTRY)/$(IMG_SRC_BUILDER_IMAGE):$${SH_IMG_TAG}"
+endef
+
+.PHONY: asu.up
+asu.up: ## Up ASU server with official imagebuilder
+	$(call Asu/Up,$(ASU_BASE_CONTAINER_OFFICIAL),$(ASU_UPSTREAM_OFFICIAL))
+
+.PHONY: asu.src.up
+asu.src.up: ## Up ASU server with src imagebuilder (push images via asu.push.*)
+	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_OFFICIAL))
+
+.PHONY: asu.custom.up
+asu.custom.up: ## Up ASU server with src imagebuilder and own metadata (custom devices)
+	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_CUSTOM))
+
+.PHONY: asu.meta.publish
+asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
+	@if [ ! -f "$(SRC_BINARY_TARGETS_DIR)/profiles.json" ]; then
+		echo " - profiles.json not found: $(SRC_BINARY_TARGETS_DIR) (run src build first)"
+		exit 1
+	fi
+
+	SH_META_VERSION_DIR=$(ASU_META_DIR)/$(OWRT_DOWNLOAD_AREA_PATH)
+	mkdir -p "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)" "$${SH_META_VERSION_DIR}/packages"
+
+	echo " - publishing targets/$(SRC_TARGET)/$(SRC_SUBTARGET)"
+	# asu/owut only need json metadata and package indexes; skip firmware
+	# images and builder archives
+	rsync -a --delete \
+		--exclude 'openwrt-imagebuilder-*' \
+		--exclude 'openwrt-sdk-*' \
+		--exclude 'openwrt-toolchain-*' \
+		--exclude '*.bin' \
+		--exclude '*.itb' \
+		--exclude '*.img' \
+		--exclude '*.img.gz' \
+		--exclude '*.trx' \
+		--exclude '*.chk' \
+		--exclude '*.elf' \
+		--exclude '*-initramfs*' \
+		"$(SRC_BINARY_TARGETS_DIR)/" "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/"
+
+	if [ -d "$(OWRT_DIR)/bin/packages" ]; then
+		echo " - publishing packages feeds"
+		rsync -a "$(OWRT_DIR)/bin/packages/" "$${SH_META_VERSION_DIR}/packages/"
+	fi
+
+	echo " - generating .targets.json"
+	cd "$${SH_META_VERSION_DIR}"
+	SH_MAP='{}'
+	for SH_PROFILES in targets/*/*/profiles.json; do
+		SH_T=$${SH_PROFILES#targets/}
+		SH_T=$${SH_T%/profiles.json}
+		SH_ARCH=$$(jq -r '.arch_packages' "$${SH_PROFILES}")
+		SH_MAP=$$(jq -c --arg t "$${SH_T}" --arg a "$${SH_ARCH}" '. + {($$t): $$a}' <<< "$${SH_MAP}")
+	done
+	jq . <<< "$${SH_MAP}" >| .targets.json
+	jq -c . .targets.json
+
+	if [ -n "$(OWRT_VERSION_PATCH)" ]; then
+		echo " - generating .versions.json"
+		cd - > /dev/null
+		jq -n --arg v "$(OWRT_VERSION)" \
+			'{stable_version: $$v, oldstable_version: "", upcoming_version: ""}' >| "$(ASU_META_DIR)/.versions.json"
+	fi
+
+.PHONY: asu.down
+asu.down: ## Destroy ASU server
+	$(ASU_COMPOSE) down
+
+.PHONY: asu.logs
+asu.logs: ## Tail ASU server logs
+	$(ASU_COMPOSE) logs -f --tail=100
+
+asu.push.profile.%: ## Push src imagebuilder image for profile to ASU registry
+	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
+	$(call Asu/Push)
+
+asu.push.device.%: ## Push src imagebuilder image for device to ASU registry
+	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
+	$(call Asu/Push)
 
 
 ##@ Source Builder Docker Targets
@@ -412,75 +634,91 @@ src.pull: ## Src pull
 	git pull
 	popd
 
-	rm "$(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE)"
+	rm -f "$(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE)"
 
 	$(call Src/Version)
 
-.PHONY: src.owrt.%
 src.owrt.%: ## Src openwrt make custom command (target/linux/clean)
 	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) $*
 
 .PHONY: src.check.umask
 src.check.umask: ## Src check umask https://github.com/openwrt/openwrt/issues/9545
 	@umask=$$(umask)
-	if [ $$umask -ne "0002" ] && [ $$umask -ne "0022" ]; then
+	if [ "$$umask" != "0002" ] && [ "$$umask" != "0022" ]; then
 		echo " - invalid umask: $$umask"
 		exit 1
 	fi
 
 .PHONY: src.install.feeds
 src.install.feeds: ## Src install feeds
-	@cd $(OWRT_DIR)
-	@MAKEFLAGS= ./scripts/feeds update -a
-	@MAKEFLAGS= ./scripts/feeds install -a
+	@if [ -n "$(SRC_FEEDS_EXTRA)" ]; then
+		echo " - custom feeds: $(SRC_FEEDS_EXTRA)"
+		{
+			echo "# generated by openwrt-buildroot from $(SRC_FEEDS_EXTRA), do not edit"
+			cat "$(OWRT_DIR)/feeds.conf.default" "$(SRC_FEEDS_EXTRA)"
+		} >| "$(OWRT_DIR)/feeds.conf"
+	elif [ -f "$(OWRT_DIR)/feeds.conf" ] && head -1 "$(OWRT_DIR)/feeds.conf" | grep -qF 'generated by openwrt-buildroot'; then
+		echo " - removing stale generated feeds.conf"
+		rm "$(OWRT_DIR)/feeds.conf"
+	fi
+
+	cd $(OWRT_DIR)
+	MAKEFLAGS= ./scripts/feeds update -a
+	MAKEFLAGS= ./scripts/feeds install -a
 
 .PHONY: src.patch
 src.patch: ## Src apply patches
 	@cd $(OWRT_DIR)
-	QUILT_PATCHES=$(SRC_QUILT_PATCHES) quilt push -va || [ "$$?" -eq "2" ] || :
+	QUILT_PATCHES=$(SRC_QUILT_PATCHES) quilt push -va && rc=0 || rc=$$?
+	[ $$rc -eq 0 ] || [ $$rc -eq 2 ] || exit $$rc
 
 .PHONY: src.patch.undo
 src.patch.undo: ## Src patches undo
 	@cd $(OWRT_DIR)
 	QUILT_PATCHES=$(SRC_QUILT_PATCHES) quilt pop -va
 
-.PHONY: src.quilt.%
 src.quilt.%:
 	@cd $(OWRT_DIR)
 	QUILT_PATCHES=$(SRC_QUILT_PATCHES) quilt $* $(ARGS)
 
 .PHONY: src.build.config
 src.build.config: ## Src build config
-	@$(call Setup/Vars,$(SRC_TARGETS_DIR)/generic/config.mk)
+	@$(call Setup/Vars,$(SRC_GENERIC_CONFIG))
 	@$(call Setup/Vars,$(SRC_TARGETS_DIR)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.mk)
 
 	@wget "$(SRC_CONFIG_URL)" -O config.buildinfo
 
-	@echo " - generic sed line delete"
+	@echo " - generic line delete"
 	@for line in $(GENERIC_SED_LINE_DELETE); do
 		echo "   - processing $${line}"
-		#grep -Fxq "$${line}" config.buildinfo
-		sed -i "/$${line}/d" config.buildinfo
+		grep -Fv "$${line}" config.buildinfo >| config.buildinfo.tmp || :
+		mv config.buildinfo.tmp config.buildinfo
 	done
 
-	@echo " - $(SRC_TARGET)/$(SRC_SUBTARGET) sed line delete"
+	@echo " - $(SRC_TARGET)/$(SRC_SUBTARGET) line delete"
 	@for line in $(CONFIG_SED_LINE_DELETE); do
 		echo "   - processing $${line}"
-		#grep -Fq "$${line}" config.buildinfo
-		sed -i "/$${line}/d" config.buildinfo
+		grep -Fv "$${line}" config.buildinfo >| config.buildinfo.tmp || :
+		mv config.buildinfo.tmp config.buildinfo
 	done
 
 	@echo " - generic line add"
 	@for line in $(GENERIC_LINE_ADD); do
 		echo "   - processing $${line}"
-		grep -Fxq "$${line}" config.buildinfo && exit 1
+		if grep -Fxq "$${line}" config.buildinfo; then
+			echo " - line already present in config.buildinfo: $${line}"
+			exit 1
+		fi
 		echo "$${line}" >> config.buildinfo
 	done
 
 	@echo " - $(SRC_TARGET)/$(SRC_SUBTARGET) line add"
 	@for line in $(CONFIG_LINE_ADD); do
 		echo "   - processing $${line}"
-		grep -Fxq "$${line}" config.buildinfo && exit 1
+		if grep -Fxq "$${line}" config.buildinfo; then
+			echo " - line already present in config.buildinfo: $${line}"
+			exit 1
+		fi
 		echo "$${line}" >> config.buildinfo
 	done
 
@@ -505,7 +743,7 @@ src.download.vermagic: ## Src download vermagic info
 src.validate.vermagic: ## Src validate vermagic
 	@$(call Setup/Vars,$(SRC_TARGETS_DIR)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.mk)
 
-	VERMAGIC=$(shell grep -Eo '([0-9a-f]{32})' $(SRC_BINARY_TARGETS_DIR)/openwrt-$(addsuffix -,$(MANIFEST_VERSION))$(SRC_TARGET)-$(SRC_SUBTARGET).manifest)
+	VERMAGIC=$$(grep -m1 -Eo '[0-9a-f]{32}' "$(SRC_BINARY_TARGETS_DIR)/openwrt-$(addsuffix -,$(MANIFEST_VERSION))$(SRC_TARGET)-$(SRC_SUBTARGET).manifest" || :)
 	@if [ "$(VALIDATE_VERMAGIC)" == "1" ] && [ "$$VERMAGIC" != "$(CONFIG_KERNEL_VERMAGIC)" ]; then
 		echo " - vermagic mismatch: $$VERMAGIC expected $(CONFIG_KERNEL_VERMAGIC)"
 		exit 1
@@ -524,23 +762,23 @@ src.fast.dtb:
 
 .PHONY: src.download
 src.download: ## Src download
-	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) download -j$$(nproc) || \
-		MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) download V=sc
+	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) download -j$$(nproc)
 
 .PHONY: src.tools.install
 src.tools.install: ## Src tools install
-	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) tools/install -j$$(nproc) || \
-		MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) tools/install V=sc
+	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) tools/install -j$$(nproc)
 
 .PHONY: src.toolchain.install
 src.toolchain.install: ## Src toolchain install
-	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) toolchain/install -j$$(nproc) || \
-		MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) toolchain/install V=sc
+	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) toolchain/install -j$$(nproc)
 
 .PHONY: src.build
 src.build: ## Src build
-	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) -j$$(nproc) || \
-		MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) V=sc
+	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) -j$$(nproc)
+
+.PHONY: src.debug
+src.debug: ## Re-run failed step single-threaded verbose (resumes at failure point)
+	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) V=sc
 
 .PHONY: src.archive
 src.archive: $(SRC_ARTIFACTS_DIR) ## Src archive
@@ -549,7 +787,7 @@ src.archive: $(SRC_ARTIFACTS_DIR) ## Src archive
 		exit 1
 	fi
 
-	if [ -z $$(find "$(SRC_BINARY_TARGETS_DIR)/" -mindepth 1 -maxdepth 1 -print -quit) ]; then
+	if [ -z "$$(find "$(SRC_BINARY_TARGETS_DIR)/" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
 		echo " - empty dir: $(SRC_BINARY_TARGETS_DIR)"
 		exit 1
 	fi
@@ -559,13 +797,12 @@ src.archive: $(SRC_ARTIFACTS_DIR) ## Src archive
 	@echo " - copying: $(SRC_IMG_BUILDER_FILE)"
 	cp -f $(SRC_BINARY_TARGETS_DIR)/$(SRC_IMG_BUILDER_FILE) $(SRC_ARTIFACTS_DIR)/$(SRC_IMG_BUILDER_FILE)
 
+	@echo " - copying sdk: $(SDK_FILE_PATTERN)"
+	cp -f $(SRC_BINARY_TARGETS_DIR)/$(SDK_FILE_PATTERN) $(SRC_ARTIFACTS_DIR)/
+
 	@echo " - archiving: $(SRC_ARTIFACTS_ARCHIVE_FILE)"
 
-	pushd $(OWRT_DIR)/bin
-	7z a -mx=9 $(SRC_ARTIFACTS_ARCHIVE_FILE) .
-	popd
-
-	mv -f $(OWRT_DIR)/bin/$(SRC_ARTIFACTS_ARCHIVE_FILE) $(SRC_ARTIFACTS_DIR)/
+	tar -C $(OWRT_DIR)/bin -cf - . | zstd $(ARCHIVE_ZSTD_OPTS) -f -o $(SRC_ARTIFACTS_DIR)/$(SRC_ARTIFACTS_ARCHIVE_FILE)
 
 _src.all.base: src.patch src.build.config src.download src.tools.install src.toolchain.install src.build src.validate.vermagic src.archive
 

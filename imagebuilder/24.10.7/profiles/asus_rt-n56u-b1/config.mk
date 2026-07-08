@@ -1,0 +1,10 @@
+CONFIG_TARGET := ramips
+CONFIG_SUBTARGET := mt7621
+CONFIG_PROFILE := asus_rt-n56u-b1
+CONFIG_CUSTOM_PKGS := \
+	-ppp \
+	-ppp-mod-pppoe \
+	-odhcp6c \
+	-odhcpd-ipv6only
+
+# TODO: update pkgs
