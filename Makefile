@@ -13,6 +13,11 @@ GID := $(shell id -g)
 export GID
 
 
+# local user config (gitignored, see local.mk.example): set OWRT_RELEASE,
+# SRC_TARGET, SRC_SUBTARGET etc there instead of editing this Makefile;
+# CLI variables still win over it
+-include local.mk
+
 # version selection: make OWRT_RELEASE=<name> ... where versions/<name>.mk exists
 OWRT_RELEASE ?= 24.10.7
 ifeq ($(wildcard versions/$(OWRT_RELEASE).mk),)
@@ -20,7 +25,7 @@ ifeq ($(wildcard versions/$(OWRT_RELEASE).mk),)
 endif
 include versions/$(OWRT_RELEASE).mk
 
-# src target selection, override from CLI:
+# src target selection, override from local.mk or CLI:
 #   make src.all SRC_TARGET=mediatek SRC_SUBTARGET=filogic
 SRC_TARGET ?= ramips
 SRC_SUBTARGET ?= mt7621
@@ -31,9 +36,9 @@ OWRT_DIR ?=
 SRC_OWRT_GIT ?=
 
 OWRT_BRANCH_SAFE := $(subst /,-,$(OWRT_BRANCH))
-OWRT_GET_VER_SCRIPT := scripts/getver.sh
-OWRT_GIT_VERSION_FILE := version
-OWRT_GIT_VERSION := $(shell cat $(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE) 2>/dev/null || echo unknown)
+# revision straight from the tree: the native getver.sh needs the full
+# commit history, which src.clone provides via --filter=blob:none
+OWRT_GIT_VERSION := $(shell cd $(OWRT_DIR) 2>/dev/null && ./scripts/getver.sh 2>/dev/null || echo unknown)
 
 ifeq ($(OWRT_VERSION_MAJOR_MINOR), master)
 	OWRT_DOWNLOAD_AREA_PATH := snapshots
@@ -85,12 +90,16 @@ OWRT_DOWNLOAD_AREA_URL := https://downloads.openwrt.org
 OWRT_TARGETS_URL := $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets
 ARTIFACTS_DIR := artifacts
 
+# flaky-network tolerant curl: --retry alone skips TLS/connection errors,
+# --retry-all-errors covers them (costs 3 extra tries on hard 404s)
+CURL := curl -sSf --retry 3 --retry-all-errors --retry-delay 2 --max-time 120
+
 SRC_DIR := srcbuilder/$(CONFIG_DIR_VERSION)
 SRC_TARGETS_DIR := $(SRC_DIR)/targets
 # per-version generic config wins over the shared one
-SRC_GENERIC_CONFIG := $(firstword $(wildcard $(SRC_TARGETS_DIR)/generic/config.mk) srcbuilder/common/generic.mk)
+SRC_GENERIC_CONFIG := $(firstword $(wildcard $(SRC_TARGETS_DIR)/generic/config.mk) srcbuilder/generic.mk)
 # optional custom feeds appended to feeds.conf.default; per-version wins
-SRC_FEEDS_EXTRA := $(firstword $(wildcard $(SRC_DIR)/feeds-extra.conf) $(wildcard srcbuilder/common/feeds-extra.conf))
+SRC_FEEDS_EXTRA := $(firstword $(wildcard $(SRC_DIR)/feeds-extra.conf) $(wildcard srcbuilder/feeds-extra.conf))
 SRC_CONFIG_URL := $(OWRT_TARGETS_URL)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.buildinfo
 SRC_QUILT_PATCHES := ../$(SRC_DIR)/patches
 
@@ -99,7 +108,7 @@ SRC_ARTIFACTS_ARCHIVE_FILE := openwrt-$(OWRT_VERSION)-$(SRC_TARGET)-$(SRC_SUBTAR
 SRC_BINARY_TARGETS_DIR := $(OWRT_DIR)/bin/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)
 SRC_IMG_BUILDER_FILE := openwrt-imagebuilder-$(addsuffix -,$(IMG_BUILDER_FILE_VERSION))$(SRC_TARGET)-$(SRC_SUBTARGET).Linux-x86_64.tar.zst
 
-IMG_BUILDER_IMAGE := quay.io/openwrt/imagebuilder
+IMG_BUILDER_IMAGE ?= quay.io/openwrt/imagebuilder
 
 IMG_DIR := imagebuilder/$(CONFIG_DIR_VERSION)
 IMG_ARTIFACTS_DIR := $(ARTIFACTS_DIR)/img/$(CONFIG_DIR_VERSION)
@@ -109,7 +118,7 @@ IMG_GENERIC_FILES_DIR := $(IMG_DIR)/$(IMG_FILES_DIR_NAME)
 
 IMG_SRC_BUILDER_IMAGE ?= varch/openwrt-imagebuilder
 
-SDK_IMAGE := quay.io/openwrt/sdk
+SDK_IMAGE ?= quay.io/openwrt/sdk
 SDK_BUILDER_IMAGE ?= varch/openwrt-sdkbuilder
 SDK_FILE_PATTERN := openwrt-sdk-*$(SRC_TARGET)-$(SRC_SUBTARGET)_*.Linux-x86_64.tar.zst
 SDK_LOCAL_PKGS_DIR := sdkbuilder/packages
@@ -281,9 +290,19 @@ endef
 
 define Img/Builder/Docker/Build
     @echo " - imagebuilder docker build"
+	# always materialize the file so COPY in the Dockerfile has a source;
+	# empty file means no extra repositories get baked in
+	mkdir -p $(IMG_TMP_DIR)
+	: >| $(IMG_TMP_DIR)/ib-repositories-extra.conf
+	for SH_REPOS_SRC in $(IMG_DIR)/repositories-extra.conf $(IMG_DIR)/profiles/$(CONFIG_PROFILE)/repositories-extra.conf $(if $(CONFIG_DEVICE),$(IMG_DIR)/devices/$(CONFIG_DEVICE)/repositories-extra.conf); do
+		if [ -f "$${SH_REPOS_SRC}" ]; then
+			cat "$${SH_REPOS_SRC}" >> $(IMG_TMP_DIR)/ib-repositories-extra.conf
+		fi
+	done
 	docker buildx build -t $(CONFIG_DOCKER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) -f imgbuilder.Dockerfile \
 		--build-arg SRC_ARTIFACTS_DIR=$(SRC_ARTIFACTS_DIR) \
 		--build-arg SRC_IMG_BUILDER_FILE=openwrt-imagebuilder-$(addsuffix -,$(IMG_BUILDER_FILE_VERSION))$(CONFIG_TARGET)-$(CONFIG_SUBTARGET).Linux-x86_64.tar.zst \
+		--build-arg IB_REPOS_EXTRA_FILE=$(IMG_TMP_DIR)/ib-repositories-extra.conf \
 		.
 endef
 
@@ -299,12 +318,12 @@ define Img/Info
 	fi
 
 	echo " - download area profile: vermagic, default-packages, device-packages, images"
-	curl -s $(OWRT_TARGETS_URL)/$(CONFIG_TARGET)/$(CONFIG_SUBTARGET)/profiles.json | jq $${SH_JQ_RULES}
+	$(CURL) $(OWRT_TARGETS_URL)/$(CONFIG_TARGET)/$(CONFIG_SUBTARGET)/profiles.json | jq $${SH_JQ_RULES}
 endef
 
 define Img/Download/Pkgs
 	echo " - download area profile: default-packages, device-packages"
-	curl -s $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(CONFIG_TARGET)/$(CONFIG_SUBTARGET)/profiles.json | jq -r '.default_packages + .profiles."$(CONFIG_PROFILE)".device_packages | join(" ")'
+	$(CURL) $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(CONFIG_TARGET)/$(CONFIG_SUBTARGET)/profiles.json | jq -r '.default_packages + .profiles."$(CONFIG_PROFILE)".device_packages | join(" ")'
 endef
 
 $(IMG_ARTIFACTS_DIR):
@@ -329,19 +348,20 @@ _img.info.%:
 
 	$(call Img/Info)
 
-_img.profile.%: img.recreate.tmp
-	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
+# $(1): profiles | devices
+define Img/Pipeline
+	$(call Setup/Vars,$(IMG_DIR)/$(1)/$*/config.mk)
 	$(call Img/Files)
 	$(call Img/Repos)
 	$(call Img/Make)
 	$(call Img/Archive)
+endef
+
+_img.profile.%: img.recreate.tmp
+	$(call Img/Pipeline,profiles)
 
 _img.device.%: img.recreate.tmp
-	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
-	$(call Img/Files)
-	$(call Img/Repos)
-	$(call Img/Make)
-	$(call Img/Archive)
+	$(call Img/Pipeline,devices)
 
 _img.src.build.profile.%:
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
@@ -351,7 +371,6 @@ _img.src.build.device.%:
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Img/Builder/Docker/Build)
 
-# note: .PHONY has no effect on pattern rules; these targets never match real files
 img.download.pkgs.profile.%:
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Img/Download/Pkgs)
@@ -483,8 +502,16 @@ ASU_REGISTRY := localhost:5001
 ASU_BASE_CONTAINER_OFFICIAL := ghcr.io/openwrt/imagebuilder
 ASU_BASE_CONTAINER_SRC := registry:5000/$(IMG_SRC_BUILDER_IMAGE)
 ASU_UPSTREAM_OFFICIAL := https://downloads.openwrt.org
-ASU_UPSTREAM_CUSTOM := http://metadata
+# must be reachable both by the asu server and by clients (owut on routers
+# resolves upstream_url itself), so use the public proxy address, which
+# routes /releases/ and /.versions.json to the metadata container
+ASU_UPSTREAM_CUSTOM ?= http://10.10.10.33:8000
 ASU_META_DIR := $(ASU_DIR)/metadata
+# merge official/third-party feed indexes into published metadata during
+# asu.meta.publish (see scripts/asu-merge-feed-indexes.py); 0 = pure src.
+# collisions always resolve to the highest version (opkg semantics), so the
+# indexes show exactly what the imagebuilder will install
+ASU_MERGE_INDEXES ?= 1
 
 define Asu/Up
 	@mkdir -p $(ASU_DIR)/public/store $(ASU_META_DIR)
@@ -539,6 +566,32 @@ asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
 	if [ -d "$(OWRT_DIR)/bin/packages" ]; then
 		echo " - publishing packages feeds"
 		rsync -a "$(OWRT_DIR)/bin/packages/" "$${SH_META_VERSION_DIR}/packages/"
+
+		# owut and asu discover feeds via packages/<arch>/feeds.conf, which
+		# buildbot generates but a plain build does not
+		echo " - generating feeds.conf"
+		for SH_ARCH_DIR in "$${SH_META_VERSION_DIR}"/packages/*/; do
+			SH_ARCH=$$(basename "$${SH_ARCH_DIR}")
+			: >| "$${SH_ARCH_DIR}feeds.conf"
+			# the feed name (2nd field) must equal the feed directory name,
+			# asu resolves packages/<arch>/<name>/ from it
+			for SH_FEED_DIR in "$${SH_ARCH_DIR}"*/; do
+				SH_FEED=$$(basename "$${SH_FEED_DIR}")
+				echo "src/gz $${SH_FEED} $(ASU_UPSTREAM_CUSTOM)/$(OWRT_DOWNLOAD_AREA_PATH)/packages/$${SH_ARCH}/$${SH_FEED}" >> "$${SH_ARCH_DIR}feeds.conf"
+			done
+		done
+
+		# routers also install packages from the official feeds via opkg,
+		# so merge the official indexes in (highest version wins, matching
+		# opkg) to keep owut/asu version checks complete; third-party repos
+		# baked into the imagebuilder image get mirrored as extra feeds.
+		# disable with ASU_MERGE_INDEXES=0 to publish pure src indexes
+		if [ "$(ASU_MERGE_INDEXES)" = "1" ]; then
+			echo " - merging official feed indexes"
+			python3 scripts/asu-merge-feed-indexes.py "$${SH_META_VERSION_DIR}" \
+				"$(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)" \
+				$(wildcard $(IMG_DIR)/repositories-extra.conf $(IMG_DIR)/profiles/*/repositories-extra.conf $(IMG_DIR)/devices/*/repositories-extra.conf)
+		fi
 	fi
 
 	echo " - generating .targets.json"
@@ -556,13 +609,34 @@ asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
 	if [ -n "$(OWRT_VERSION_PATCH)" ]; then
 		echo " - generating .versions.json"
 		cd - > /dev/null
-		jq -n --arg v "$(OWRT_VERSION)" \
-			'{stable_version: $$v, oldstable_version: "", upcoming_version: ""}' >| "$(ASU_META_DIR)/.versions.json"
+		# asu needs versions_list; keep previously published versions
+		SH_VERSIONS_FILE=$(ASU_META_DIR)/.versions.json
+		SH_OLD_LIST=$$([ -f "$${SH_VERSIONS_FILE}" ] && jq -c '.versions_list // []' "$${SH_VERSIONS_FILE}" || echo '[]')
+		jq -n --arg v "$(OWRT_VERSION)" --argjson old "$${SH_OLD_LIST}" \
+			'{stable_version: $$v, oldstable_version: "", upcoming_version: "", versions_list: (($$old + [$$v]) | unique)}' >| "$${SH_VERSIONS_FILE}"
 	fi
+
+	# the bind mount goes stale if $(ASU_META_DIR) was deleted/recreated while
+	# the container ran (nginx serves 404 with the files on disk) — restart
+	# remounts by path; ignore failure when the asu stack is not up
+	cd "$(CURDIR)"
+	$(ASU_COMPOSE) restart metadata 2>/dev/null || true
+
+.PHONY: asu.stop
+asu.stop: ## Stop ASU server containers (keep them for restart)
+	$(ASU_COMPOSE) stop
+
+.PHONY: asu.restart
+asu.restart: ## Restart ASU server containers
+	$(ASU_COMPOSE) restart
 
 .PHONY: asu.down
 asu.down: ## Destroy ASU server
 	$(ASU_COMPOSE) down
+
+.PHONY: asu.destroy
+asu.destroy: ## Destroy ASU server including volumes (registry, redis, podman storage)
+	$(ASU_COMPOSE) down -v
 
 .PHONY: asu.logs
 asu.logs: ## Tail ASU server logs
@@ -575,6 +649,57 @@ asu.push.profile.%: ## Push src imagebuilder image for profile to ASU registry
 asu.push.device.%: ## Push src imagebuilder image for device to ASU registry
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Asu/Push)
+
+# order matters (.NOTPARALLEL keeps prerequisites sequential): metadata must
+# be published and served before img.src.* — its opkg resolves the local_core
+# repo from the metadata server, an empty one 404s and the image build dies
+# on missing core packages if the official mirror flakes at the same time
+asu.cycle.profile.%: asu.meta.publish asu.custom.up img.src.profile.% asu.push.profile.% ## Publish metadata, build and push src imagebuilder for profile (run src.all first)
+	@echo " - asu cycle done: $*"
+
+asu.cycle.device.%: asu.meta.publish asu.custom.up img.src.device.% asu.push.device.% ## Publish metadata, build and push src imagebuilder for device (run src.all first)
+	@echo " - asu cycle done: $*"
+
+
+##@ Deploy Targets
+
+
+# rsync destination (user@host:/path, no trailing slash), set in local.mk
+DEPLOY_DEST ?=
+# never sent to the host; under --delete (without --delete-excluded) these
+# are also left alone on the receiver
+# leading / anchors a pattern to the repo root (bare names match anywhere)
+DEPLOY_EXCLUDES := .git .claude .idea /openwrt '/openwrt-*' /artifacts \
+	.ccache asu/public asu/metadata .DS_Store __pycache__ \
+	'/config.buildinfo*' '*.log' '*.rc'
+# host-only state that must survive even an exclude-list mistake: rsync 'P'
+# filters forbid deletion regardless of --delete and exclude typos.
+# local.mk is deliberately NOT here: the laptop copy is the source of truth
+# and overwrites the host one on deploy
+DEPLOY_PROTECT := asu/metadata asu/public openwrt artifacts .ccache
+
+DEPLOY_RSYNC = rsync -av --delete \
+	$(foreach e,$(DEPLOY_EXCLUDES),--exclude=$(e)) \
+	$(foreach p,$(DEPLOY_PROTECT),--filter='P /$(p)') \
+	./ "$(DEPLOY_DEST)/"
+
+define Deploy/Check
+	@if [ -z "$(DEPLOY_DEST)" ]; then
+		echo " - DEPLOY_DEST not set, add to local.mk:"
+		echo "   DEPLOY_DEST := builder@tp6:/home/builder/src/openwrt-buildroot"
+		exit 1
+	fi
+endef
+
+.PHONY: deploy.diff
+deploy.diff: ## Preview deploy (rsync dry-run: what gets sent/deleted)
+	$(call Deploy/Check)
+	$(DEPLOY_RSYNC) --dry-run
+
+.PHONY: deploy
+deploy: ## Deploy repo to DEPLOY_DEST (host-only paths protected from --delete)
+	$(call Deploy/Check)
+	$(DEPLOY_RSYNC)
 
 
 ##@ Source Builder Docker Targets
@@ -600,17 +725,6 @@ src.docker.shell: ## Src builder container shell access
 ##@ Source Builder Targets
 
 
-define Src/Version
-    @echo " - src version update"
-	@if [ ! -e "$(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE)" ]; then
-		pushd "$(OWRT_DIR)"
-		../"$(OWRT_GET_VER_SCRIPT)" > "$(OWRT_GIT_VERSION_FILE)"
-		popd
-
-		echo " - version file generated: $(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE) - $$(cat $(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE))"
-	fi
-endef
-
 $(SRC_ARTIFACTS_DIR):
 	@mkdir -p $@
 
@@ -624,19 +738,34 @@ src.clean.owrt: ## Delete openwrt dir
 
 .PHONY: src.clone
 src.clone: ## Src clone openwrt
-	git clone --depth 1 --branch $(GIT_REF) $(SRC_OWRT_GIT) $(OWRT_DIR)
+	# full history but no old blobs: PKG_RELEASE of base-files (and other
+	# COMMITCOUNT users) needs the commit count, a shallow clone yields "1"
+	# and every such package looks older than the official builds
+	@for SH_TRY in 1 2 3; do
+		git clone --filter=blob:none --branch $(GIT_REF) $(SRC_OWRT_GIT) $(OWRT_DIR) && break
+		# partial clone dir blocks the next attempt
+		rm -rf "$(OWRT_DIR)"
+		[ "$${SH_TRY}" -lt 3 ] || { echo " - clone failed after 3 tries"; exit 1; }
+		echo " - clone failed, retrying ($${SH_TRY}/3)"
+		sleep 5
+	done
 
-	$(call Src/Version)
+	# releases: pin REVISION via the version file to the official value —
+	# the release tag commit itself yields a different r-number/hash, and
+	# package version strings must match the official feeds byte for byte.
+	# branches/snapshots need no file, the native getver.sh reads git live
+	if [ -n "$(OWRT_VERSION_PATCH)" ]; then
+		$(CURL) -o "$(OWRT_DIR)/version" "$(OWRT_TARGETS_URL)/$(SRC_TARGET)/$(SRC_SUBTARGET)/version.buildinfo"
+		echo " - pinned REVISION: $$(cat $(OWRT_DIR)/version)"
+	fi
 
 .PHONY: src.pull
 src.pull: ## Src pull
-	pushd $(OWRT_DIR)
+	@pushd $(OWRT_DIR)
 	git pull
+	# stale version file would override the native getver.sh git logic
+	rm -f version
 	popd
-
-	rm -f "$(OWRT_DIR)/$(OWRT_GIT_VERSION_FILE)"
-
-	$(call Src/Version)
 
 src.owrt.%: ## Src openwrt make custom command (target/linux/clean)
 	@MAKEFLAGS= $(MAKE) -C $(OWRT_DIR) $*
@@ -686,7 +815,7 @@ src.build.config: ## Src build config
 	@$(call Setup/Vars,$(SRC_GENERIC_CONFIG))
 	@$(call Setup/Vars,$(SRC_TARGETS_DIR)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.mk)
 
-	@wget "$(SRC_CONFIG_URL)" -O config.buildinfo
+	@$(CURL) -o config.buildinfo "$(SRC_CONFIG_URL)"
 
 	@echo " - generic line delete"
 	@for line in $(GENERIC_SED_LINE_DELETE); do
@@ -729,19 +858,21 @@ src.build.config: ## Src build config
 
 .PHONY: src.download.config
 src.download.config: ## Src download config info
-	curl -s $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.buildinfo
+	$(CURL) $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.buildinfo
 
 .PHONY: src.download.version
 src.download.version: ## Src download version info
-	curl -s $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/version.buildinfo
+	$(CURL) $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/version.buildinfo
 
 .PHONY: src.download.vermagic
 src.download.vermagic: ## Src download vermagic info
-	curl -s $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/profiles.json | jq -r '.linux_kernel.vermagic'
+	$(CURL) $(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/profiles.json | jq -r '.linux_kernel.vermagic'
 
 .PHONY: src.validate.vermagic
 src.validate.vermagic: ## Src validate vermagic
 	@$(call Setup/Vars,$(SRC_TARGETS_DIR)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.mk)
+
+	cat $(OWRT_DIR)/build_dir/target-*/linux-*/linux-*/.vermagic
 
 	VERMAGIC=$$(grep -m1 -Eo '[0-9a-f]{32}' "$(SRC_BINARY_TARGETS_DIR)/openwrt-$(addsuffix -,$(MANIFEST_VERSION))$(SRC_TARGET)-$(SRC_SUBTARGET).manifest" || :)
 	@if [ "$(VALIDATE_VERMAGIC)" == "1" ] && [ "$$VERMAGIC" != "$(CONFIG_KERNEL_VERMAGIC)" ]; then
@@ -803,6 +934,31 @@ src.archive: $(SRC_ARTIFACTS_DIR) ## Src archive
 	@echo " - archiving: $(SRC_ARTIFACTS_ARCHIVE_FILE)"
 
 	tar -C $(OWRT_DIR)/bin -cf - . | zstd $(ARCHIVE_ZSTD_OPTS) -f -o $(SRC_ARTIFACTS_DIR)/$(SRC_ARTIFACTS_ARCHIVE_FILE)
+
+	# per-profile distributable zips: images + profiles.json + manifest under
+	# a same-named top dir
+	@echo " - zipping profile images"
+	SH_PROFILES_JSON=$(SRC_BINARY_TARGETS_DIR)/profiles.json
+	SH_MANIFEST=$(SRC_BINARY_TARGETS_DIR)/openwrt-$(addsuffix -,$(MANIFEST_VERSION))$(SRC_TARGET)-$(SRC_SUBTARGET).manifest
+	SH_ZIP_TMP=$(SRC_ARTIFACTS_DIR)/zip-tmp
+	for SH_PROFILE in $$(jq -r '.profiles | keys[]' "$${SH_PROFILES_JSON}"); do
+		SH_ZIP_BASE=openwrt-$(OWRT_VERSION)-$(SRC_TARGET)-$(SRC_SUBTARGET)-$${SH_PROFILE}
+		SH_STAGE=$${SH_ZIP_TMP}/$${SH_ZIP_BASE}
+		rm -rf "$${SH_ZIP_TMP}"
+		mkdir -p "$${SH_STAGE}"
+		for SH_IMG in $$(jq -r --arg p "$${SH_PROFILE}" '.profiles[$$p].images[].name' "$${SH_PROFILES_JSON}"); do
+			if [ -f "$(SRC_BINARY_TARGETS_DIR)/$${SH_IMG}" ]; then
+				cp -f "$(SRC_BINARY_TARGETS_DIR)/$${SH_IMG}" "$${SH_STAGE}/"
+			else
+				echo "   ! missing image: $${SH_IMG}"
+			fi
+		done
+		cp -f "$${SH_PROFILES_JSON}" "$${SH_MANIFEST}" "$${SH_STAGE}/"
+		(cd "$${SH_ZIP_TMP}" && zip -rq "$${SH_ZIP_BASE}.zip" "$${SH_ZIP_BASE}")
+		mv -f "$${SH_ZIP_TMP}/$${SH_ZIP_BASE}.zip" "$(SRC_ARTIFACTS_DIR)/$${SH_ZIP_BASE}.zip"
+		echo "   - $${SH_ZIP_BASE}.zip"
+	done
+	rm -rf "$${SH_ZIP_TMP}"
 
 _src.all.base: src.patch src.build.config src.download src.tools.install src.toolchain.install src.build src.validate.vermagic src.archive
 

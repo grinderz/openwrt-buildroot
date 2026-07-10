@@ -40,11 +40,17 @@ make asu.up                             # official ghcr.io/openwrt/imagebuilder
 make asu.src.up                         # src-built imagebuilder, official metadata
 make asu.custom.up                      # src imagebuilder + own metadata (custom devices)
 make asu.meta.publish                   # publish profiles.json/packages from the src build
-make asu.push.device.rtr1-gl-mt6000     # publish an img.src image to the registry
+make asu.push.device.<name>     # publish an img.src image to the registry
 make asu.push.profile.<name>
+make asu.cycle.device.<name>            # publish + up + img.src + push, in that order:
+make asu.cycle.profile.<name>           #   img.src needs live metadata (local_core repo)
 make asu.logs
 make asu.down
 ```
+
+Compose image versions are pinned in `asu/.env` (auto-loaded by compose; asu
+itself has no versioned tags, so it is pinned to `latest` by digest). To bump:
+update `asu/.env`, `make asu.custom.up`.
 
 ## Cycle for a custom device (absent from the official repo)
 

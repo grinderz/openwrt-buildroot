@@ -84,11 +84,10 @@ Signed-off-by: Fil Dunsky <filipp.dunsky@gmail.com>
  3 files changed, 223 insertions(+)
  create mode 100644 target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
 
-diff --git a/target/linux/ramips/dts/mt7621_securifi_almond-3s.dts b/target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
-new file mode 100644
-index 00000000000000..2747c0f3b2cd73
+Index: openwrt/target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
+===================================================================
 --- /dev/null
-+++ b/target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
++++ openwrt/target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
 @@ -0,0 +1,205 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 +/*
@@ -295,11 +294,11 @@ index 00000000000000..2747c0f3b2cd73
 +	status = "okay";
 +	current-speed = <57600>;
 +};
-diff --git a/target/linux/ramips/image/mt7621.mk b/target/linux/ramips/image/mt7621.mk
-index 96653683de6393..232700865e6b9c 100644
---- a/target/linux/ramips/image/mt7621.mk
-+++ b/target/linux/ramips/image/mt7621.mk
-@@ -2788,6 +2788,19 @@ define Device/samknows_whitebox-v8
+Index: openwrt/target/linux/ramips/image/mt7621.mk
+===================================================================
+--- openwrt.orig/target/linux/ramips/image/mt7621.mk
++++ openwrt/target/linux/ramips/image/mt7621.mk
+@@ -2564,6 +2564,19 @@ define Device/samknows_whitebox-v8
  endef
  TARGET_DEVICES += samknows_whitebox-v8
  
@@ -319,11 +318,11 @@ index 96653683de6393..232700865e6b9c 100644
  define Device/sercomm_na502
    $(Device/nand)
    $(Device/uimage-lzma-loader)
-diff --git a/target/linux/ramips/mt7621/base-files/etc/board.d/02_network b/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
-index cf0515b0d3acf9..63ed589fca26de 100644
---- a/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
-+++ b/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
-@@ -120,6 +120,11 @@ ramips_setup_interfaces()
+Index: openwrt/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
+===================================================================
+--- openwrt.orig/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
++++ openwrt/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
+@@ -108,6 +108,11 @@ ramips_setup_interfaces()
  	xiaomi,mi-router-4a-gigabit-v2)
  		ucidef_set_interfaces_lan_wan "lan1 lan2" "wan"
  		;;
@@ -335,3 +334,4 @@ index cf0515b0d3acf9..63ed589fca26de 100644
  	bolt,arion)
  		ucidef_set_interfaces_lan_wan "lan" "wan"
  		ucidef_set_interface "eth_data" device "modem.103" protocol "static" ipaddr "10.22.127.222" netmask "255.255.255.255"
+ 

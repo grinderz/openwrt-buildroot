@@ -31,24 +31,26 @@ Persistent selection: `export OWRT_RELEASE=... SRC_TARGET=... SRC_SUBTARGET=...`
 
 | `SRC_TARGET/SRC_SUBTARGET` | srcbuilder configs | imagebuilder profiles / devices |
 |----------------------------|--------------------|---------------------------------|
-| `ramips/mt7621` (default)  | 24.10.7, 25.12.5, master | asus_rt-n56u-b1; securifi_almond-3s (24.10.7/25.12.5 via patch, master); device: — |
+| `ramips/mt7621` (default)  | 24.10.7, 25.12.5, master | asus_rt-n56u-b1; securifi_almond-3s (24.10.7/25.12.5 via patch, master); device: rtr3-almond-s3 |
 | `mediatek/filogic`         | 24.10, 24.10.7, 25.12, 25.12.5, master | cudy_ap3000-v1, cudy_m3000-v1, cudy_m3000-v2-yt8821 (master), cudy_tr3000-256mb-v1, cudy_tr3000-v1-ubootmod, xiaomi_mi-router-ax3000t-ubootmod; device: rtr1-gl-mt6000 |
 | `bcm27xx/bcm2710`          | 24.10.7            | rpi-3; device: nut-rpi-3 |
 | `bcm27xx/bcm2711`          | 24.10.7            | rpi-4 |
 | `bcm47xx/mips74k`          | 24.10.7            | netgear_wnr3500l-v1-na |
 | `rockchip/armv8`           | 24.10.7            | friendlyarm_nanopi-r3s |
 | `sunxi/cortexa53`          | 24.10.7            | xunlong_orangepi-zero3 |
-| `x86/64`                   | 24.10.7            | generic; device: generic-lec-7233 |
+| `x86/64`                   | 24.10.7            | generic; device: demo-lec-7233 |
 
 # Custom feeds / repositories
 
-- src build: `srcbuilder/common/feeds-extra.conf` (or per-version
+- src build: `srcbuilder/feeds-extra.conf` (or per-version
   `srcbuilder/<version>/feeds-extra.conf`) is appended to `feeds.conf.default`
   by `src.install.feeds`. See `feeds-extra.conf.example`.
-- imagebuilder: `repositories-extra.conf` in `imagebuilder/<version>/`,
-  `.../profiles/<name>/` or `.../devices/<name>/` is appended to
+- imagebuilder: `repositories-extra.conf` from `imagebuilder/<version>/`,
+  `.../profiles/<name>/` and `.../devices/<name>/` are **concatenated** in
+  that order (all that exist, not first-match) and appended to
   `repositories.conf` inside the container (signature check is disabled when
-  custom repos are present).
+  custom repos are present). Overlapping lines produce harmless
+  "Duplicate src declaration" opkg warnings — keep each repo in one file.
 - sdk: `sdkbuilder/feeds-extra.conf` is appended to `feeds.conf.default`
   inside the SDK container.
 - asu: `repository_allow_list` in `asu/asu.toml` whitelists external repo URL
@@ -63,49 +65,17 @@ take precedence over feeds.
 # ASU server
 
 Self-hosted [attended sysupgrade server](https://github.com/openwrt/asu) for
-`owut` / `luci-app-attendedsysupgrade`, API on `http://<host>:8000` (bound to
-all interfaces so routers can reach it; `allow_defaults = true` in `asu.toml`
-lets any LAN client submit arbitrary uci-defaults — keep it on a trusted
-network):
-
-```
-make asu.up                             # official ghcr.io/openwrt/imagebuilder images
-make asu.src.up                         # src-built imagebuilder images
-make asu.custom.up                      # src imagebuilder + own metadata (custom devices)
-make asu.meta.publish                   # publish src profiles/packages metadata
-make asu.push.device.rtr1-gl-mt6000     # publish src imagebuilder image to the ASU registry
-make asu.push.profile.<name>
-make asu.logs
-make asu.down
-```
-
-asu always pulls the imagebuilder image, so `asu.src.up` mode uses a local
-registry inside the compose project: build the image (`img.src.*`), then
-`asu.push.*` tags and pushes it. Config: `asu/asu.toml`. Requested version maps
-to image tag as `24.10.7 -> v24.10.7`, `24.10-SNAPSHOT -> openwrt-24.10`,
-`SNAPSHOT -> master` -- same scheme the img targets already use.
+`owut` / `luci-app-attendedsysupgrade`, API on `http://<host>:8000`. Services,
+make targets, custom-device cycle, tag mapping — see [asu/README.md](asu/README.md).
 
 # TODO
 
 - github actions https://github.com/csharper2005/openwrt-actions/tree/main/.github/workflows
-- add files for almond 3S https://github.com/fildunsky/openwrt/commit/4c4f6be9a9d275e164c956df7e6e500532182f55#diff-73dd4ffe9df107bd271e3e636bbacebf6bb212f5a8ef42295f36b6c54b1d6334
-- add uci-default wlan_name (WIFI)
-- clean image profiles
-- map packages dir + pass to src imagebuilder (local packages from src build)
-- imagebuilder add DISABLED_SERVICES
-- customfeeds.conf
-- repositeries.conf
 - make img.ib.% (package_whatdepends, package_depends, manifest)
-- https://dl.openwrt.ai/releases/24.10/packages/aarch64_cortex-a53/kiddin9/
-- https://downloads.immortalwrt.org/releases/24.10.2/packages/aarch64_cortex-a53/luci/luci-theme-argon_2.4.2-r20250617_all.ipk
-- https://github.com/koshev-msk/modemfeed
-- s3 securify https://4pda.to/forum/index.php?showtopic=1085698&view=findpost&p=137406633 https://ssclash.notion.site/ZRAM-20a89188f6b4809aa3d4f4297356a27f
 - replace mtk firmware https://forum.openwrt.org/t/retired-thread-gl-inet-flint-2-gl-mt6000-snapshot-experimental-bleeding-edge/197278/39
 - build pkg action https://github.com/zerolabnet/SSClash/blob/main/.github/workflows/build.yml
 - https://github.com/vernette/beszel-agent-openwrt/blob/master/.github/workflows/build-package.yml
 - https://github.com/bigmalloy/luci-app-fancontrol
-- https://github.com/Slava-Shchipunov/awg-openwrt
-- Vermagic cat build_dir/target-*/linux-*/linux-*/.vermagic
 
 # Repos
 
@@ -131,11 +101,6 @@ to image tag as `24.10.7 -> v24.10.7`, `24.10-SNAPSHOT -> openwrt-24.10`,
 
 - bin: https://dl.openwrt.ai/packages-24.10/*/kiddin9/
 
-
-# Pkgs
-
-- beszel-agent-openwrt https://github.com/vernette/beszel-agent-openwrt
-- luci-theme-proton2025 https://github.com/ChesterGoodiny/luci-theme-proton2025
 
 # Patch
 

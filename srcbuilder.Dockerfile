@@ -30,7 +30,9 @@ apt-get install --no-install-recommends --no-install-suggests --yes \
   python3-pyelftools \
   python3-cryptography \
   swig \
+  jq \
   unzip \
+  zip \
   zlib1g-dev \
   file \
   curl \

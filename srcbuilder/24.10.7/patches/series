@@ -1,3 +1,5 @@
 001-force-vermagic.patch
-002-wireless-regdb-unlock.patch
-003-securifi-almond-3s.patch
+002-imagebuilder-copy-base-files.patch
+003-imagebuilder-copy-wireless-regdb.patch
+004-wireless-regdb-unlock.patch
+005-securifi-almond-3s.patch

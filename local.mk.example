@@ -1,0 +1,28 @@
+# local user config: copy to local.mk (gitignored) and adjust.
+# Loaded by the Makefile before anything else; command-line variables
+# (make SRC_TARGET=...) still override these values.
+
+OWRT_RELEASE := 24.10.7
+SRC_TARGET := ramips
+SRC_SUBTARGET := mt7621
+
+# public URL of the asu proxy: must be reachable by the asu server, the
+# routers (owut resolves upstream_url itself) and nested podman builders
+ASU_UPSTREAM_CUSTOM := http://10.10.10.33:8000
+
+# merge official/third-party feed indexes into published metadata during
+# asu.meta.publish; 0 = publish pure src indexes
+ASU_MERGE_INDEXES := 1
+
+# archive contents are mostly pre-compressed, tune threads/level per host
+ARCHIVE_ZSTD_OPTS := -T0 -3
+
+# rsync destination for make deploy / deploy.diff (build host checkout)
+#DEPLOY_DEST := builder@tp6:/home/builder/src/openwrt-buildroot
+
+# docker image names: official builder/sdk (mirror them if quay is slow or
+# blocked) and the locally built src variants
+IMG_BUILDER_IMAGE := quay.io/openwrt/imagebuilder
+SDK_IMAGE := quay.io/openwrt/sdk
+IMG_SRC_BUILDER_IMAGE := varch/openwrt-imagebuilder
+SDK_BUILDER_IMAGE := varch/openwrt-sdkbuilder

@@ -3,7 +3,8 @@
 #   asu.up      -> ghcr.io/openwrt/imagebuilder (official)
 #   asu.src.up  -> registry:5000/varch/openwrt-imagebuilder (src build)
 
-upstream_url = "https://downloads.openwrt.org"
+#upstream_url = "https://downloads.openwrt.org"
+upstream_url = "http://metadata"
 log_level = "INFO"
 
 # nginx caching proxy for package downloads between builds, runs inside
@@ -16,14 +17,16 @@ allow_defaults = true
 # allowed external repository URL prefixes for build requests
 # (client-supplied repos are rejected unless they match one of these)
 repository_allow_list = [
-    "https://github.com/fantastic-packages/releases/raw/",
-    "https://raw.githubusercontent.com/routerich/",
-    "https://raw.githubusercontent.com/4IceG/",
-    "https://dl.openwrt.ai/",
-    "https://downloads.immortalwrt.org/",
+    "https://raw.githubusercontent.com/4IceG/Modem-extras/main/myrepo/",
+    "https://openwrt.132lan.ru/packages/",
+    "http://10.99.158.1:80/openwrt/releases/",
+#    "https://github.com/fantastic-packages/releases/raw/",
+#    "https://raw.githubusercontent.com/routerich/",
+#    "https://raw.githubusercontent.com/4IceG/",
+#    "https://dl.openwrt.ai/",
 ]
 
-build_ttl = "7d"
+build_ttl = "1d"
 build_ttl_unversioned = "24h"
 build_defaults_ttl = "30m"
 build_failure_ttl = "1h"

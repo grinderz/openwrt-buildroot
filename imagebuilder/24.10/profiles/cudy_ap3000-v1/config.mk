@@ -5,4 +5,5 @@ CONFIG_CUSTOM_PKGS := \
 	iperf3 \
 	lm-sensors \
 	ethtool-full \
-	mdio-tools
+	mdio-tools \
+	\

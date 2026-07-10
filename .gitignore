@@ -8,3 +8,5 @@ openwrt-*/
 asu/public/
 asu/metadata/
 config.buildinfo*
+__pycache__/
+local.mk
