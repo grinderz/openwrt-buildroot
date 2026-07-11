@@ -1,0 +1,8 @@
+CONFIG_KERNEL_VERMAGIC :=
+
+CONFIG_LINE_ADD := \
+	CONFIG_TARGET_DEVICE_ramips_mt7621_DEVICE_securifi_almond-3s=y \
+	\
+
+CONFIG_SED_LINE_DELETE := \
+	\

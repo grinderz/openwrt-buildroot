@@ -1,14 +1,14 @@
 FROM docker.io/ubuntu:24.04
 
-SHELL ["/bin/bash", "-o", "pipefail", "-o", "errtrace", "-o", "pipefail", "-o", "noclobber", "-o", "errexit", "-o", "nounset", "-c"]
+SHELL ["/bin/bash", "-o", "errtrace", "-o", "pipefail", "-o", "noclobber", "-o", "errexit", "-o", "nounset", "-c"]
 ARG DEBIAN_FRONTEND=noninteractive
 ENV GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
 
 USER root
 
 RUN <<EOT
-apt update
-apt install --no-install-recommends --no-install-suggests --yes \
+apt-get update
+apt-get install --no-install-recommends --no-install-suggests --yes \
   ca-certificates \
   build-essential \
   ccache \
@@ -20,8 +20,8 @@ apt install --no-install-recommends --no-install-suggests --yes \
   gcc-multilib \
   gawk \
   gettext \
-  git-core \
-  libncurses5-dev \
+  git \
+  libncurses-dev \
   libssl-dev \
   python3-dev \
   python3-setuptools \
@@ -30,7 +30,9 @@ apt install --no-install-recommends --no-install-suggests --yes \
   python3-pyelftools \
   python3-cryptography \
   swig \
+  jq \
   unzip \
+  zip \
   zlib1g-dev \
   file \
   curl \

@@ -1,0 +1,337 @@
+From d81a319b17dd7f394dec0c3626ad96561493db3a Mon Sep 17 00:00:00 2001
+From: Fil Dunsky <filipp.dunsky@gmail.com>
+Date: Thu, 29 Jan 2026 12:31:18 +0300
+Subject: [PATCH] ramips: add support Securifi Almond 3S
+
+MediaTek MT7621A
+256 Mb RAM, 64 Mb MT25QL512AB Flash
+Wi-Fi: MediaTek MT7662 (2.4/5Ghz)
+1 gigbit 2x LAN, 1x WAN
+miniPCIE Quectel EC21-E LTE Cat 1 EC21EFAR06A03M4G
+LCD Display: S028HQ29NN
+Touchscreen controller: SX8650 (i2c from Mouser Electronics)
+PIC16LF1509 controller
+Charge controller BQ24133 (battery lasts for 4-5 hours of work)
+Zigbee: EM357
+Siren (Sound)
+1x white LED
+Buttons: Power, Reset, Tamper
+
+MAC addresses:
+factory 0x28: LAN MAC (gmac0)
+factory 0x2e: WAN MAC (switch0 port@0)
+
+EEPROM data:
+factory 0x0:    2.4GHz wireless EEPROM
+factory 0x8000: 5GHz wireless EEPROM
+
+WIP:
+- LED
+- Screen
+- Zigbee
+- Sound
+
+Everything rules via PIC16LF1509 controller,
+reboot is fixed by adding broken-flash-reset to .dts
+
+Installation:
+
+1. Boot into initramfs:
+In U-Boot press 4, set computer IP to 10.10.10.3, serve via tftp:
+```
+tftpboot 0x82000000 openwrt-ramips-mt7621-securifi_almond-3s-initramfs-kernel.bin
+bootm 0x82000000
+```
+2. Backup all partitions via luci menu
+
+****************************************
+Stock firmware uses dualboot wasting 50% of flash space.
+Since this device is useless on stock firmware
+it makes sence to utilize
+the whole flash hence we have to flash
+uboot-mt7621 bootloader by DragonBluep:
+
+Bootloader recipe:
+Clone repo: https://github.com/DragonBluep/uboot-mt7621
+Actions -> Build customized u-boot
+Run workflow:
+NOR
+192k(u-boot),64k(u-boot-env),64k(factory),-(firmware)
+0x50000
+Reset button GPIO: 32
+System LED GPIO: 31
+CPU: 880 MHz
+RAM: 1200 MT/s
+DDR3-256MiB
+oldparam = false (do not check)
+Baud Rate: 57600
+**************************************
+
+3. Flash uboot-mt7621 by https://github.com/DragonBluep/uboot-mt7621
+```
+insmod mtd-rw i_want_a_brick=1
+mtd write u-boot-mt7621.bin u-boot
+```
+4. Serve sysupgrade via luci, wait 4-5 minutes.
+5. After reboot wait for more 11 minutes
+till the filesystem initialize and enjoy OpenWrt!
+
+Signed-off-by: Fil Dunsky <filipp.dunsky@gmail.com>
+---
+ .../ramips/dts/mt7621_securifi_almond-3s.dts  | 205 ++++++++++++++++++
+ target/linux/ramips/image/mt7621.mk           |  13 ++
+ .../mt7621/base-files/etc/board.d/02_network  |   5 +
+ 3 files changed, 223 insertions(+)
+ create mode 100644 target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
+
+Index: openwrt/target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
+===================================================================
+--- /dev/null
++++ openwrt/target/linux/ramips/dts/mt7621_securifi_almond-3s.dts
+@@ -0,0 +1,205 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
++/*
++ * Copyright (c) 2026
++ * Author: Fil Dunsky <filipp.dunsky@gmail.com>
++ */
++
++#include "mt7621.dtsi"
++
++#include <dt-bindings/input/input.h>
++#include <dt-bindings/leds/common.h>
++#include <dt-bindings/gpio/gpio.h>
++
++/ {
++	model = "Securifi Almond 3S";
++	compatible = "securifi,almond-3s", "mediatek,mt7621-soc";
++
++	chosen {
++		bootargs = "console=ttyS0,57600n8";
++	};
++
++	keys {
++		compatible = "gpio-keys";
++
++		reset {
++			label = "reset";
++			linux,code = <KEY_RESTART>;
++			gpios = <&gpio 32 GPIO_ACTIVE_LOW>;
++			debounce-interval = <20>;
++		};
++
++		tamper {
++			label = "tamper";
++			linux,code = <BTN_0>;
++			gpios = <&gpio 28 GPIO_ACTIVE_LOW>;
++			debounce-interval = <20>;
++		};
++	};
++
++	leds {
++		compatible = "gpio-leds";
++
++		display_power {
++			function = LED_FUNCTION_POWER;
++			gpios = <&gpio 31 GPIO_ACTIVE_HIGH>;
++		};
++	};
++
++	gpio-export {
++		compatible = "gpio-export";
++
++		modem-reset {
++			gpio-export,name = "modem_reset";
++			gpio-export,output = <1>;
++			gpios = <&gpio 33 GPIO_ACTIVE_LOW>;
++		};
++	};
++};
++
++&i2c {
++	status = "okay";
++};
++
++&gdma {
++	status = "okay";
++};
++
++&i2s {
++	status = "okay";
++	#sound-dai-cells = <0>;
++};
++
++&spi0 {
++	status = "okay";
++
++	flash@0 { /* MT25QL512AB */
++		compatible = "jedec,spi-nor";
++		reg = <0>;
++		spi-max-frequency = <52000000>;
++		broken-flash-reset;
++
++		partitions {
++			compatible = "fixed-partitions";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			partition@0 {
++				label = "u-boot";
++				reg = <0x0 0x30000>;
++				read-only;
++			};
++
++			partition@30000 {
++				label = "u-boot-env";
++				reg = <0x30000 0x10000>;
++			};
++
++			partition@40000 {
++				label = "factory";
++				reg = <0x40000 0x10000>;
++				read-only;
++
++				nvmem-layout {
++					compatible = "fixed-layout";
++					#address-cells = <1>;
++					#size-cells = <1>;
++
++					eeprom_factory_0: eeprom@0 {
++						reg = <0x0 0x200>;
++					};
++
++					eeprom_factory_8000: eeprom@8000 {
++						reg = <0x8000 0x200>;
++					};
++
++					mac_lan: macaddr@28 {
++						reg = <0x28 0x6>;
++					};
++
++					mac_wan: macaddr@2e {
++						reg = <0x2e 0x6>;
++					};
++				};
++			};
++
++			partition@50000 {
++				compatible = "openwrt,uimage", "denx,uimage";
++				label = "firmware";
++				reg = <0x50000 0x3fb0000>;
++			};
++		};
++	};
++};
++
++&pcie {
++	status = "okay";
++};
++
++&pcie0 {
++	wifi@0,0 {
++		compatible = "mediatek,mt76";
++		reg = <0x0000 0 0 0 0>;
++		ieee80211-freq-limit = <5000000 6000000>;
++
++		nvmem-cells = <&eeprom_factory_8000>;
++		nvmem-cell-names = "eeprom";
++	};
++};
++
++&pcie1 {
++	wifi@0,0 {
++		compatible = "mediatek,mt76";
++		reg = <0x0000 0 0 0 0>;
++		ieee80211-freq-limit = <2400000 2500000>;
++
++		nvmem-cells = <&eeprom_factory_0>;
++		nvmem-cell-names = "eeprom";
++	};
++};
++
++&gmac0 {
++	nvmem-cells = <&mac_lan>;
++	nvmem-cell-names = "mac-address";
++};
++
++&ethernet {
++	pinctrl-0 = <&mdio_pins>, <&rgmii1_pins>;
++};
++
++&state_default {
++	gpio {
++		groups = "rgmii2";
++		function = "gpio";
++	};
++};
++
++&switch0 {
++	ports {
++		port@0 {
++			status = "okay";
++			label = "wan";
++			nvmem-cells = <&mac_wan>;
++			nvmem-cell-names = "mac-address";
++		};
++
++		port@1 {
++			status = "okay";
++			label = "lan2";
++		};
++
++		port@2 {
++			status = "okay";
++			label = "lan1";
++		};
++	};
++};
++
++&uartlite2 {
++	status = "okay";
++	current-speed = <57600>;
++};
++
++&uartlite3 {
++	status = "okay";
++	current-speed = <57600>;
++};
+Index: openwrt/target/linux/ramips/image/mt7621.mk
+===================================================================
+--- openwrt.orig/target/linux/ramips/image/mt7621.mk
++++ openwrt/target/linux/ramips/image/mt7621.mk
+@@ -2564,6 +2564,19 @@ define Device/samknows_whitebox-v8
+ endef
+ TARGET_DEVICES += samknows_whitebox-v8
+ 
++define Device/securifi_almond-3s
++  $(Device/dsa-migration)
++  DEVICE_VENDOR := Securifi
++  DEVICE_MODEL := Almond
++  DEVICE_VARIANT := 3S
++  IMAGE_SIZE := 65216k
++  IMAGE/sysupgrade.bin := append-kernel | pad-to 64k | append-rootfs | \
++        pad-rootfs | check-size | append-metadata
++  DEVICE_PACKAGES := kmod-mt76x2 kmod-usb3 -uboot-envtools \
++  	kmod-usb-net-qmi-wwan kmod-usb-serial-option uqmi
++endef
++TARGET_DEVICES += securifi_almond-3s
++
+ define Device/sercomm_na502
+   $(Device/nand)
+   $(Device/uimage-lzma-loader)
+Index: openwrt/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
+===================================================================
+--- openwrt.orig/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
++++ openwrt/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
+@@ -108,6 +108,11 @@ ramips_setup_interfaces()
+ 	xiaomi,mi-router-4a-gigabit-v2)
+ 		ucidef_set_interfaces_lan_wan "lan1 lan2" "wan"
+ 		;;
++	securifi,almond-3s)
++		ucidef_set_interfaces_lan_wan "lan1 lan2" "wan"
++		ucidef_set_interface "modem" device "/dev/cdc-wdm0" protocol "qmi"
++		uci add_list firewall.@zone[1].network='modem'
++		;;
+ 	bolt,arion)
+ 		ucidef_set_interfaces_lan_wan "lan" "wan"
+ 		ucidef_set_interface "eth_data" device "modem.103" protocol "static" ipaddr "10.22.127.222" netmask "255.255.255.255"
+ 

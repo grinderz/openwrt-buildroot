@@ -1,0 +1,5 @@
+CONFIG_TARGET := ramips
+CONFIG_SUBTARGET := mt7621
+CONFIG_PROFILE := securifi_almond-3s
+CONFIG_CUSTOM_PKGS := \
+	\

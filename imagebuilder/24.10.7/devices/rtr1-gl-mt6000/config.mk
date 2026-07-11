@@ -1,0 +1,7 @@
+CONFIG_TARGET := mediatek
+CONFIG_SUBTARGET := filogic
+CONFIG_PROFILE := glinet_gl-mt6000
+CONFIG_DEVICE := rtr1-gl-mt6000
+
+CONFIG_CUSTOM_PKGS := \
+	\

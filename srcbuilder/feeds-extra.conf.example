@@ -1,0 +1,6 @@
+# Extra feeds appended to feeds.conf.default during src.install.feeds.
+# Activate: cp feeds-extra.conf.example feeds-extra.conf
+# Per-version override: srcbuilder/<version>/feeds-extra.conf
+#
+#src-git modemfeed https://github.com/koshev-msk/modemfeed.git
+#src-git fantastic https://github.com/fantastic-packages/packages.git;24.10
