@@ -309,10 +309,9 @@ define Img/Files
 	fi
 endef
 
-define Img/Builder/Docker/Build
-    @echo " - imagebuilder docker build"
-	# always materialize the file so COPY in the Dockerfile has a source;
-	# empty file means no extra repositories get baked in
+# always materialize the file so COPY in the Dockerfiles has a source;
+# empty file means no extra repositories get baked in
+define Img/ReposExtra/File
 	mkdir -p $(IMG_TMP_DIR)
 	: >| $(IMG_TMP_DIR)/ib-repositories-extra.conf
 	for SH_REPOS_SRC in $(IMG_DIR)/repositories-extra.conf \
@@ -322,6 +321,11 @@ define Img/Builder/Docker/Build
 			cat "$${SH_REPOS_SRC}" >> $(IMG_TMP_DIR)/ib-repositories-extra.conf
 		fi
 	done
+endef
+
+define Img/Builder/Docker/Build
+    @echo " - imagebuilder docker build"
+	$(call Img/ReposExtra/File)
 	docker buildx build -t $(CONFIG_DOCKER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) \
 		-f imgbuilder.Dockerfile \
 		--build-arg SRC_ARTIFACTS_DIR=$(SRC_ARTIFACTS_DIR) \
@@ -330,8 +334,22 @@ define Img/Builder/Docker/Build
 		.
 endef
 
+# thin image for asu: official imagebuilder base plus baked-in third-party
+# repositories (imgbuilder-official.Dockerfile) — no src build required.
+# tagged as $(IMG_SRC_BUILDER_IMAGE) so asu.push.* and the asu registry
+# base container pick it up unchanged
+define Img/Builder/Official/Docker/Build
+    @echo " - imagebuilder docker build (official base + extra repos)"
+	$(call Img/ReposExtra/File)
+	docker buildx build --pull -t $(IMG_SRC_BUILDER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) \
+		-f imgbuilder-official.Dockerfile \
+		--build-arg IB_BASE_IMAGE=$(IMG_BUILDER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) \
+		--build-arg IB_REPOS_EXTRA_FILE=$(IMG_TMP_DIR)/ib-repositories-extra.conf \
+		.
+endef
+
 define Img/Info
-	echo " - src target default pakages"
+	echo " - src target default packages"
 	grep -s DEFAULT_PACKAGES $(OWRT_DIR)/target/linux/$(CONFIG_TARGET)/$(CONFIG_SUBTARGET)/target.mk || :
 
 	SH_JQ_RULES='.linux_kernel.vermagic,.default_packages'
@@ -397,6 +415,14 @@ _img.src.build.device.%:
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Img/Builder/Docker/Build)
 
+_img.official.build.profile.%:
+	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
+	$(call Img/Builder/Official/Docker/Build)
+
+_img.official.build.device.%:
+	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
+	$(call Img/Builder/Official/Docker/Build)
+
 img.download.pkgs.profile.%:
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Img/Download/Pkgs)
@@ -417,6 +443,12 @@ img.src.profile.%: CONFIG_BUILDER_TYPE := s
 img.src.profile.%: _img.src.build.profile.% _img.profile.% ## Build image by profile from src image builder
 	@echo
 
+img.official.profile.%: CONFIG_DOCKER_IMAGE := $(IMG_SRC_BUILDER_IMAGE)
+img.official.profile.%: CONFIG_DOCKER_PULL := never
+img.official.profile.%: CONFIG_BUILDER_TYPE := o
+img.official.profile.%: _img.official.build.profile.% _img.profile.% ## Build image by profile from official builder with baked extra repos
+	@echo
+
 img.info.profile.%: _img.info.% ## Show info from profile
 	@echo
 
@@ -430,6 +462,12 @@ img.src.device.%: CONFIG_DOCKER_IMAGE := $(IMG_SRC_BUILDER_IMAGE)
 img.src.device.%: CONFIG_DOCKER_PULL := never
 img.src.device.%: CONFIG_BUILDER_TYPE := s
 img.src.device.%: _img.src.build.device.% _img.device.% ## Build image by device from src image builder
+	@echo
+
+img.official.device.%: CONFIG_DOCKER_IMAGE := $(IMG_SRC_BUILDER_IMAGE)
+img.official.device.%: CONFIG_DOCKER_PULL := never
+img.official.device.%: CONFIG_BUILDER_TYPE := o
+img.official.device.%: _img.official.build.device.% _img.device.% ## Build image by device from official builder with baked extra repos
 	@echo
 
 
@@ -626,53 +664,15 @@ define Asu/Push
 	docker push "$(ASU_REGISTRY)/$(IMG_SRC_BUILDER_IMAGE):$${SH_IMG_TAG}"
 endef
 
-.PHONY: asu.up
-asu.up: ## Up ASU server with official imagebuilder
-	$(call Asu/Up,$(ASU_BASE_CONTAINER_OFFICIAL),$(ASU_UPSTREAM_OFFICIAL))
-
-.PHONY: asu.src.up
-asu.src.up: ## Up ASU server with src imagebuilder (push images via asu.push.*)
-	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_OFFICIAL))
-
-.PHONY: asu.custom.up
-asu.custom.up: ## Up ASU server with src imagebuilder and own metadata (custom devices)
-	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_CUSTOM))
-
-.PHONY: asu.meta.publish
-asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
-	@if [ ! -f "$(SRC_BINARY_TARGETS_DIR)/profiles.json" ]; then
-		echo " - profiles.json not found: $(SRC_BINARY_TARGETS_DIR) (run src build first)"
-		exit 1
-	fi
-
-	SH_META_VERSION_DIR=$(ASU_META_DIR)/$(OWRT_DOWNLOAD_AREA_PATH)
-	mkdir -p "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)" "$${SH_META_VERSION_DIR}/packages"
-
-	echo " - publishing targets/$(SRC_TARGET)/$(SRC_SUBTARGET)"
-	# asu/owut only need json metadata and package indexes; skip firmware
-	# images and builder archives
-	rsync -a --delete \
-		--exclude 'openwrt-imagebuilder-*' \
-		--exclude 'openwrt-sdk-*' \
-		--exclude 'openwrt-toolchain-*' \
-		--exclude '*.bin' \
-		--exclude '*.itb' \
-		--exclude '*.img' \
-		--exclude '*.img.gz' \
-		--exclude '*.trx' \
-		--exclude '*.chk' \
-		--exclude '*.elf' \
-		--exclude '*-initramfs*' \
-		"$(SRC_BINARY_TARGETS_DIR)/" "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/"
-
-	if [ -d "$(OWRT_DIR)/bin/packages" ]; then
-		echo " - publishing packages feeds"
-		rsync -a "$(OWRT_DIR)/bin/packages/" "$${SH_META_VERSION_DIR}/packages/"
-
+# shared tail of the asu.meta.publish* targets; expects SH_META_VERSION_DIR
+# to be set by the caller (same .ONESHELL recipe)
+define Asu/Meta/Finalize
+	if [ -d "$${SH_META_VERSION_DIR}/packages" ]; then
 		# owut and asu discover feeds via packages/<arch>/feeds.conf, which
 		# buildbot generates but a plain build does not
 		echo " - generating feeds.conf"
 		for SH_ARCH_DIR in "$${SH_META_VERSION_DIR}"/packages/*/; do
+			[ -d "$${SH_ARCH_DIR}" ] || continue
 			SH_ARCH=$$(basename "$${SH_ARCH_DIR}")
 			: >| "$${SH_ARCH_DIR}feeds.conf"
 			# the feed name (2nd field) must equal the feed directory name,
@@ -727,6 +727,136 @@ asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
 	# remounts by path; ignore failure when the asu stack is not up
 	cd "$(CURDIR)"
 	$(ASU_COMPOSE) restart metadata 2>/dev/null || true
+endef
+
+.PHONY: asu.up
+asu.up: ## Up ASU server with official imagebuilder
+	$(call Asu/Up,$(ASU_BASE_CONTAINER_OFFICIAL),$(ASU_UPSTREAM_OFFICIAL))
+
+.PHONY: asu.src.up
+asu.src.up: ## Up ASU server with src imagebuilder (push images via asu.push.*)
+	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_OFFICIAL))
+
+.PHONY: asu.custom.up
+asu.custom.up: ## Up ASU server with src imagebuilder and own metadata (custom devices)
+	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_CUSTOM))
+
+# the live openwrt/bin tree only holds the last built target; the src
+# archives under artifacts/ persist one per target/version, so publish
+# prefers the newest matching archive and falls back to the live tree
+.PHONY: asu.meta.publish
+asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
+	@SH_SRC_ROOT=$(OWRT_DIR)/bin
+	SH_PUB_TMP=
+	SH_ARCHIVE=$$(ls -t $(SRC_ARTIFACTS_DIR)/openwrt-$(OWRT_VERSION)-$(SRC_TARGET)-$(SRC_SUBTARGET)-*.tar.zst 2>/dev/null | head -1 || :)
+	if [ -n "$${SH_ARCHIVE}" ]; then
+		echo " - source archive: $${SH_ARCHIVE}"
+		SH_PUB_TMP=$$(mktemp -d)
+		trap 'rm -rf "$${SH_PUB_TMP}"' EXIT
+		# asu/owut only need json metadata and package indexes; skip
+		# firmware images and builder archives (leading * matches the
+		# ./targets/... path prefix of the tar members)
+		zstd -dc "$${SH_ARCHIVE}" | tar -x -C "$${SH_PUB_TMP}" \
+			--exclude '*openwrt-imagebuilder-*' \
+			--exclude '*openwrt-sdk-*' \
+			--exclude '*openwrt-toolchain-*' \
+			--exclude '*.bin' \
+			--exclude '*.itb' \
+			--exclude '*.img' \
+			--exclude '*.img.gz' \
+			--exclude '*.trx' \
+			--exclude '*.chk' \
+			--exclude '*.elf' \
+			--exclude '*-initramfs*'
+		SH_SRC_ROOT=$${SH_PUB_TMP}
+	fi
+
+	SH_SRC_TARGETS_DIR=$${SH_SRC_ROOT}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)
+	if [ ! -f "$${SH_SRC_TARGETS_DIR}/profiles.json" ]; then
+		echo " - profiles.json not found: $${SH_SRC_TARGETS_DIR}"
+		echo "   (no archive in $(SRC_ARTIFACTS_DIR) and no live tree; run src build first)"
+		exit 1
+	fi
+
+	SH_META_VERSION_DIR=$(ASU_META_DIR)/$(OWRT_DOWNLOAD_AREA_PATH)
+	mkdir -p "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)" "$${SH_META_VERSION_DIR}/packages"
+
+	echo " - publishing targets/$(SRC_TARGET)/$(SRC_SUBTARGET)"
+	rsync -a --delete \
+		--exclude 'openwrt-imagebuilder-*' \
+		--exclude 'openwrt-sdk-*' \
+		--exclude 'openwrt-toolchain-*' \
+		--exclude '*.bin' \
+		--exclude '*.itb' \
+		--exclude '*.img' \
+		--exclude '*.img.gz' \
+		--exclude '*.trx' \
+		--exclude '*.chk' \
+		--exclude '*.elf' \
+		--exclude '*-initramfs*' \
+		"$${SH_SRC_TARGETS_DIR}/" "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/"
+
+	if [ -d "$${SH_SRC_ROOT}/packages" ]; then
+		echo " - publishing packages feeds"
+		rsync -a "$${SH_SRC_ROOT}/packages/" "$${SH_META_VERSION_DIR}/packages/"
+	fi
+
+	$(call Asu/Meta/Finalize)
+
+# metadata for officially supported devices without a src build: mirror the
+# official profiles.json / target package index and seed the arch feed dirs,
+# then let the index merge fill them (official feeds + repositories-extra
+# mirrors). owut's "missing to-version" for third-party packages blocks
+# `owut upgrade`, so the served indexes must include them
+.PHONY: asu.meta.publish.official
+asu.meta.publish.official: ASU_MERGE_INDEXES := 1
+asu.meta.publish.official: ## Publish official metadata + third-party feed indexes (no src build)
+	@SH_META_VERSION_DIR=$(ASU_META_DIR)/$(OWRT_DOWNLOAD_AREA_PATH)
+	SH_TARGET_DIR=$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)
+	mkdir -p "$${SH_TARGET_DIR}/packages"
+
+	# download to a tmp name and mv into place: a mid-transfer failure must
+	# not leave a truncated file where asu/owut expect valid json (curl -o
+	# writes as data arrives)
+	echo " - mirroring official targets/$(SRC_TARGET)/$(SRC_SUBTARGET) metadata"
+	$(CURL) -o "$${SH_TARGET_DIR}/profiles.json.tmp" \
+		"$(OWRT_TARGETS_URL)/$(SRC_TARGET)/$(SRC_SUBTARGET)/profiles.json"
+	mv "$${SH_TARGET_DIR}/profiles.json.tmp" "$${SH_TARGET_DIR}/profiles.json"
+	# core (openwrt_core) index: target packages, owut reads it through
+	# asu's /json/v1/.../targets/<target>/index.json
+	$(CURL) -o "$${SH_TARGET_DIR}/packages/index.json.tmp" \
+		"$(OWRT_TARGETS_URL)/$(SRC_TARGET)/$(SRC_SUBTARGET)/packages/index.json"
+	mv "$${SH_TARGET_DIR}/packages/index.json.tmp" "$${SH_TARGET_DIR}/packages/index.json"
+
+	# release kmods live outside the target packages dir; asu merges
+	# kmods/<kver>/ into its target index, without the mirror every kmod
+	# shows as "missing to-version" in owut and blocks the upgrade
+	SH_KVER=$$(jq -r '.linux_kernel | "\(.version)-\(.release)-\(.vermagic)"' "$${SH_TARGET_DIR}/profiles.json")
+	if [ "$${SH_KVER}" != "null-null-null" ]; then
+		SH_KMODS_DIR=$${SH_TARGET_DIR}/kmods/$${SH_KVER}
+		mkdir -p "$${SH_KMODS_DIR}"
+		if $(CURL) -o "$${SH_KMODS_DIR}/index.json.tmp" \
+				"$(OWRT_TARGETS_URL)/$(SRC_TARGET)/$(SRC_SUBTARGET)/kmods/$${SH_KVER}/index.json"; then
+			mv "$${SH_KMODS_DIR}/index.json.tmp" "$${SH_KMODS_DIR}/index.json"
+		else
+			rm -f "$${SH_KMODS_DIR}/index.json.tmp"
+			echo " - kmods index not mirrored (fetch failed; keeping previous if any)"
+		fi
+	fi
+
+	SH_ARCH=$$(jq -r '.arch_packages' "$${SH_TARGET_DIR}/profiles.json")
+	echo " - seeding packages/$${SH_ARCH} feed dirs from the official feeds.conf"
+	mkdir -p "$${SH_META_VERSION_DIR}/packages/$${SH_ARCH}"
+	$(CURL) "$(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)/packages/$${SH_ARCH}/feeds.conf" \
+	| while read -r SH_SRC SH_FEED SH_URL; do
+		# 2nd field is the feed name; skip blanks and comment lines, a
+		# "# comment" would otherwise seed a junk feed dir
+		if [ -n "$${SH_FEED}" ] && [ "$${SH_SRC#\#}" = "$${SH_SRC}" ]; then
+			mkdir -p "$${SH_META_VERSION_DIR}/packages/$${SH_ARCH}/$${SH_FEED}"
+		fi
+	done
+
+	$(call Asu/Meta/Finalize)
 
 .PHONY: asu.stop
 asu.stop: ## Stop ASU server containers (keep them for restart)
@@ -756,17 +886,77 @@ asu.push.device.%: ## Push src imagebuilder image for device to ASU registry
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Asu/Push)
 
-# order matters (.NOTPARALLEL keeps prerequisites sequential): metadata must
-# be published and served before img.src.* — its opkg resolves the local_core
-# repo from the metadata server, an empty one 404s and the image build dies
-# on missing core packages if the official mirror flakes at the same time
+# publish for the profile/device's own target: the cycles are invoked with
+# a profile name, but asu.meta.publish* resolve the target from
+# SRC_TARGET/SRC_SUBTARGET (local.mk), which may point elsewhere — re-invoke
+# them with the config's CONFIG_TARGET/CONFIG_SUBTARGET instead
+_asu.publish.profile.%:
+	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
+	@MAKEFLAGS= $(MAKE) asu.meta.publish SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+
+_asu.publish.device.%:
+	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
+	@MAKEFLAGS= $(MAKE) asu.meta.publish SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+
+# refuse BEFORE mirroring: publish.official overwrites the src-published
+# profiles.json of the target, so running the official cycle for a device
+# absent from the official release (almond etc.) would break its asu flow
+define Asu/Official/ProfileGuard
+	SH_TMP_PROFILES=$$(mktemp)
+	trap 'rm -f "$${SH_TMP_PROFILES}"' EXIT
+	$(CURL) -o "$${SH_TMP_PROFILES}" "$(OWRT_TARGETS_URL)/$(CONFIG_TARGET)/$(CONFIG_SUBTARGET)/profiles.json"
+	if ! jq -e --arg p "$(CONFIG_PROFILE)" '.profiles[$$p]' "$${SH_TMP_PROFILES}" > /dev/null; then
+		echo " - profile '$(CONFIG_PROFILE)' is not in the official $(CONFIG_TARGET)/$(CONFIG_SUBTARGET) $(OWRT_VERSION) release"
+		echo "   official cycle would clobber src metadata — use asu.cycle.profile/device.* (src flow) instead"
+		exit 1
+	fi
+endef
+
+_asu.publish.official.profile.%:
+	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
+	$(call Asu/Official/ProfileGuard)
+	MAKEFLAGS= $(MAKE) asu.meta.publish.official SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+
+_asu.publish.official.device.%:
+	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
+	$(call Asu/Official/ProfileGuard)
+	MAKEFLAGS= $(MAKE) asu.meta.publish.official SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+
+# order matters: metadata must be published and served before img.src.* —
+# its opkg resolves the local_core repo from the metadata server, an empty
+# one 404s and the image build dies on missing core packages if the official
+# mirror flakes at the same time. sequenced via sub-makes in the recipe:
+# make builds explicit-target prerequisites BEFORE pattern-derived ones,
+# so a prerequisite list would run asu.custom.up first
 asu.cycle.profile.%: ## Publish metadata, build and push src imagebuilder for profile (run src.all first)
-asu.cycle.profile.%: asu.meta.publish asu.custom.up img.src.profile.% asu.push.profile.%
+	@MAKEFLAGS= $(MAKE) _asu.publish.profile.$*
+	MAKEFLAGS= $(MAKE) asu.custom.up
+	MAKEFLAGS= $(MAKE) img.src.profile.$*
+	MAKEFLAGS= $(MAKE) asu.push.profile.$*
 	@echo " - asu cycle done: $*"
 
 asu.cycle.device.%: ## Publish metadata, build and push src imagebuilder for device (run src.all first)
-asu.cycle.device.%: asu.meta.publish asu.custom.up img.src.device.% asu.push.device.%
+	@MAKEFLAGS= $(MAKE) _asu.publish.device.$*
+	MAKEFLAGS= $(MAKE) asu.custom.up
+	MAKEFLAGS= $(MAKE) img.src.device.$*
+	MAKEFLAGS= $(MAKE) asu.push.device.$*
 	@echo " - asu cycle done: $*"
+
+# official-device variant: no src build, official imagebuilder base with
+# baked third-party repos, metadata mirrored from downloads.openwrt.org
+asu.cycle.official.profile.%: ## Publish official metadata, build and push official-based imagebuilder for profile
+	@MAKEFLAGS= $(MAKE) _asu.publish.official.profile.$*
+	MAKEFLAGS= $(MAKE) asu.custom.up
+	MAKEFLAGS= $(MAKE) img.official.profile.$*
+	MAKEFLAGS= $(MAKE) asu.push.profile.$*
+	@echo " - asu official cycle done: $*"
+
+asu.cycle.official.device.%: ## Publish official metadata, build and push official-based imagebuilder for device
+	@MAKEFLAGS= $(MAKE) _asu.publish.official.device.$*
+	MAKEFLAGS= $(MAKE) asu.custom.up
+	MAKEFLAGS= $(MAKE) img.official.device.$*
+	MAKEFLAGS= $(MAKE) asu.push.device.$*
+	@echo " - asu official cycle done: $*"
 
 
 ##@ Deploy Targets

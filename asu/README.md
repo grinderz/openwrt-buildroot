@@ -39,11 +39,18 @@ scripts baked into images — keep the server on a trusted network;
 make asu.up                             # official ghcr.io/openwrt/imagebuilder
 make asu.src.up                         # src-built imagebuilder, official metadata
 make asu.custom.up                      # src imagebuilder + own metadata (custom devices)
-make asu.meta.publish                   # publish profiles.json/packages from the src build
-make asu.push.device.<name>     # publish an img.src image to the registry
+make asu.meta.publish                   # publish profiles.json/packages from the newest
+                                        #   src archive (artifacts/src/<ver>/), falls back
+                                        #   to the live openwrt/bin tree
+make asu.meta.publish.official          # mirror official metadata + third-party indexes
+make asu.push.device.<name>     # publish an img.src/img.official image to the registry
 make asu.push.profile.<name>
 make asu.cycle.device.<name>            # publish + up + img.src + push, in that order:
-make asu.cycle.profile.<name>           #   img.src needs live metadata (local_core repo)
+make asu.cycle.profile.<name>           #   img.src needs live metadata (local_core repo);
+                                        #   publish target/subtarget comes from the
+                                        #   profile/device config.mk, not local.mk
+make asu.cycle.official.device.<name>   # same with the official imagebuilder base
+make asu.cycle.official.profile.<name>  #   (baked extra repos, no src build)
 make asu.logs
 make asu.down
 ```
@@ -52,10 +59,37 @@ Compose image versions are pinned in `asu/.env` (auto-loaded by compose; asu
 itself has no versioned tags, so it is pinned to `latest` by digest). To bump:
 update `asu/.env`, `make asu.custom.up`.
 
+## Cycle for an official device with third-party repositories (no src build)
+
+owut/LuCI cannot pass `repositories` in build requests, so third-party repos
+must be baked into the imagebuilder image, and owut refuses to upgrade when
+installed packages have no to-version in the served indexes. For devices that
+exist on downloads.openwrt.org both problems are solved without a src build:
+
+1. `make asu.meta.publish.official` — mirrors the official `profiles.json` and
+   target package index into `asu/metadata/`, then merges the official feed
+   indexes plus the `repositories-extra.conf` mirrors (so owut sees to-versions
+   for third-party packages);
+2. `make asu.custom.up` — same custom mode as below;
+3. `make img.official.device.<name>` — thin image: official imagebuilder base
+   (`imgbuilder-official.Dockerfile`) with `repositories-extra.conf` appended
+   to `repositories.conf`, tagged like the src images;
+4. `make asu.push.device.<name>` — push to the compose-local registry.
+
+Or all of it in order: `make asu.cycle.official.device.<name>`. Release
+versions only — snapshot images unpack the imagebuilder at build time, the
+baked repos would be lost (the docker build fails on them by design).
+
+The cycle refuses profiles absent from the official release (the mirror
+would overwrite the src-published `profiles.json` of that target and break
+its custom devices) — use the src cycle below for those.
+
 ## Cycle for a custom device (absent from the official repo)
 
 1. `make src.all` — build from sources with the device profile
-   (the profile lands in `bin/targets/.../profiles.json`);
+   (the profile lands in `bin/targets/.../profiles.json`, `src.archive`
+   snapshots `openwrt/bin` into `artifacts/src/<ver>/` — publish reads the
+   newest archive, so builds for other targets can overwrite the live tree);
 2. `make img.src.profile.<name>` — imagebuilder image built;
 3. `make asu.meta.publish` — profiles.json, `.targets.json`, `.versions.json`
    and package feeds published to `asu/metadata/`;

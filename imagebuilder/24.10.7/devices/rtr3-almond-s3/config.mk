@@ -4,31 +4,34 @@ CONFIG_PROFILE := securifi_almond-3s
 CONFIG_DEVICE := rtr3-almond-s3
 
 CONFIG_CUSTOM_PKGS := \
+	ethstatus \
 	htop \
 	internet-detector-mod-telegram \
 	ip-tiny \
+	kmod-mt76x2 \
+	kmod-mtd-rw \
 	kmod-nft-tproxy \
+	kmod-usb3 \
+	libudev-zero \
 	luci-app-3ginfo-lite \
 	luci-app-adblock \
 	luci-app-atinout \
 	luci-app-attendedsysupgrade \
-	luci-app-commands \
 	luci-app-internet-detector \
 	luci-app-modemband \
 	luci-app-smstools3 \
 	luci-app-ssclash \
 	luci-app-statistics \
 	luci-app-ttyd \
-	luci-app-watchcat \
 	luci-proto-mbim \
 	luci-proto-qmi \
 	luci-proto-wireguard \
 	mbim-utils \
+	mtr-json \
 	owut \
 	qmi-utils \
+	ssclash-mihomo \
 	telegrambot \
 	usbutils \
 	wget-ssl \
-	ssclash-mihomo \
-	ethstatus \
 	\

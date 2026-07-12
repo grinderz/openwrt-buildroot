@@ -108,23 +108,41 @@ def merge_packages(
     return merged
 
 
-def parse_packages(raw: str) -> dict[str, str]:
-    """opkg Packages file -> {name: version}"""
+def parse_packages(raw: str, arch: str | None = None) -> dict[str, str]:
+    """opkg Packages file -> {name: version}, optionally filtered by arch.
+
+    Mixed feeds carry entries for several architectures ('all' plus a
+    native one), so filtering has to happen per entry, not per feed.
+    """
     packages: dict[str, str] = {}
-    name = None
+    entry: dict[str, str] = {}
+
+    def flush() -> None:
+        name, version = entry.get("Package"), entry.get("Version")
+        pkg_arch = entry.get("Architecture")
+        if name and version and (
+            arch is None or pkg_arch is None or pkg_arch in (arch, "all")
+        ):
+            packages[name] = version
+
     for line in raw.splitlines():
-        if line.startswith("Package: "):
-            name = line.split(": ", 1)[1].strip()
-        elif line.startswith("Version: ") and name:
-            packages[name] = line.split(": ", 1)[1].strip()
-        elif not line.strip():
-            name = None
+        if not line.strip():
+            flush()
+            entry = {}
+        elif not line.startswith(" ") and ": " in line:
+            key, value = line.split(": ", 1)
+            entry[key] = value.strip()
+    flush()
     return packages
 
 
 def mirror_extra_repos(arch_dir: Path, repo_files: list[str]) -> None:
     feeds_conf = arch_dir / "feeds.conf"
     feeds_text = feeds_conf.read_text() if feeds_conf.is_file() else ""
+    # feeds written during this run: the first write replaces whatever a
+    # previous run left (dropping packages meanwhile removed upstream),
+    # later same-named writes merge (see below)
+    written: set[str] = set()
 
     for repo_file in repo_files:
         for line in Path(repo_file).read_text().splitlines():
@@ -138,10 +156,24 @@ def mirror_extra_repos(arch_dir: Path, repo_files: list[str]) -> None:
                 print(f" - extra {feed}: Packages not fetched, skipped")
                 continue
 
-            packages = parse_packages(raw.decode())
+            # every arch dir sees every repositories-extra.conf line, so
+            # entries built for a different architecture are dropped
+            packages = parse_packages(raw.decode(), arch_dir.name)
+            if not packages:
+                print(f" - extra {feed}: no {arch_dir.name} packages, skipped")
+                continue
             feed_dir = arch_dir / feed
             feed_dir.mkdir(exist_ok=True)
-            (feed_dir / "index.json").write_text(
+            index_file = feed_dir / "index.json"
+            # profiles for different archs may reuse a feed name with
+            # different urls ("modemfeed") — merge same-run duplicates
+            # instead of overwriting, or the last url's arch-filtered
+            # subset wins; cross-run state is replaced, not merged
+            if feed in written and index_file.is_file():
+                existing = json.loads(index_file.read_text()).get("packages", {})
+                packages = merge_packages(existing, packages)
+            written.add(feed)
+            index_file.write_text(
                 json.dumps({"architecture": arch_dir.name, "packages": packages})
             )
             if f"src/gz {feed} " not in feeds_text:
