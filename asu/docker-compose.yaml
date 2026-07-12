@@ -37,13 +37,17 @@ services:
         condition: service_healthy
 
   worker:
-    image: ${ASU_IMAGE:?set in asu/.env}
+    # ASU_IMAGE plus the tls_verify patch, see asu.Dockerfile (built by
+    # `docker compose up --build` / the asu.* make targets)
+    image: varch/asu-worker:latest
+    build:
+      context: .
+      dockerfile: asu.Dockerfile
+      args:
+        ASU_IMAGE: ${ASU_IMAGE:?set in asu/.env}
     restart: unless-stopped
-    # asu hardcodes the socket path, symlink it to the shared volume.
-    # sed: podman-py pull() sends tlsVerify=true by default, which overrides
-    # the insecure registry config — force it off so pulls from the plain-http
-    # compose-local registry work (asu passes no tls_verify itself)
-    command: sh -c 'ln -sf /sock/podman.sock /var/podman.sock && sed -i "s/podman.images.pull(image)/podman.images.pull(image, tls_verify=False)/" /app/asu/build.py && exec uv run rqworker --logging_level INFO'
+    # asu hardcodes the socket path, symlink it to the shared volume
+    command: sh -c 'ln -sf /sock/podman.sock /var/podman.sock && exec uv run rqworker --logging_level INFO'
     environment:
       REDIS_URL: redis://redis:6379/0
       BASE_CONTAINER: ${ASU_BASE_CONTAINER:-ghcr.io/openwrt/imagebuilder}

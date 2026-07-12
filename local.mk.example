@@ -8,7 +8,7 @@ SRC_SUBTARGET := mt7621
 
 # public URL of the asu proxy: must be reachable by the asu server, the
 # routers (owut resolves upstream_url itself) and nested podman builders
-ASU_UPSTREAM_CUSTOM := http://10.10.10.33:8000
+ASU_UPSTREAM_CUSTOM := http://192.0.2.1:8000
 
 # merge official/third-party feed indexes into published metadata during
 # asu.meta.publish; 0 = publish pure src indexes
@@ -18,7 +18,7 @@ ASU_MERGE_INDEXES := 1
 ARCHIVE_ZSTD_OPTS := -T0 -3
 
 # rsync destination for make deploy / deploy.diff (build host checkout)
-#DEPLOY_DEST := builder@tp6:/home/builder/src/openwrt-buildroot
+#DEPLOY_DEST := user@buildhost:/home/user/src/openwrt-buildroot
 
 # docker image names: official builder/sdk (mirror them if quay is slow or
 # blocked) and the locally built src variants

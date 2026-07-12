@@ -21,7 +21,11 @@ make src.all SRC_TARGET=mediatek SRC_SUBTARGET=filogic
 make img.profile.rpi-4
 make pkg.<package>              # build a package with the official openwrt/sdk image
 make pkg.htop SRC_TARGET=mediatek SRC_SUBTARGET=filogic
+make pkg.build PKGS="a b c"     # several packages in ONE container run (feeds cloned once)
 make pkg.sdk.<package>          # build a package with the SDK from src build, results in artifacts/pkg/
+make pkg.sdk.build PKGS="a b c" # several packages with the src-build SDK in one run
+make deploy                     # rsync this repo to DEPLOY_DEST (set in local.mk); deploy.diff = dry run
+make fetch                      # mirror artifacts/ back from DEPLOY_DEST; fetch.diff = dry run (--delete!)
 ```
 
 Persistent selection: `export OWRT_RELEASE=... SRC_TARGET=... SRC_SUBTARGET=...`
@@ -61,6 +65,37 @@ imagebuilder archive in `artifacts/src/<version>/`. `pkg.sdk.%` builds the SDK
 docker image from it, then compiles the package from feeds. Local package
 sources placed in `sdkbuilder/packages/<name>/` are mounted into the SDK and
 take precedence over feeds.
+
+# Package builds (pkg.* / SDK containers)
+
+`pkg.<name>` and `pkg.build PKGS="a b c"` compile packages with the official
+`openwrt/sdk` docker image; `pkg.sdk.<name>` / `pkg.sdk.build` do the same
+with the SDK produced by the src build (for patched trees / custom vermagic).
+Built `.ipk`/`.apk` files land in `artifacts/pkg/<version>/`
+(`.../tmp` holds the raw output of the last run).
+
+- **Persistent SDK state**: the container's `/builder` lives in a named docker
+  volume (`owrt-pkg-<builder>-<target>-<subtarget>-<tag>`) — feeds checkout,
+  `dl/` and build/staging dirs survive between runs, so a warm rebuild only
+  recompiles what changed. Docker seeds the volume from the image on first
+  use; a re-pulled image under the same tag does NOT refresh it — reset with
+  `pkg.clean.state` (current target/release) or `pkg.clean.state.all`.
+  Disable per run with `SDK_STATE=0`.
+- **ccache**: `CONFIG_CCACHE=y` is injected before `defconfig` (disable with
+  `SDK_CCACHE=0`); the cache lives inside the state volume, so recompiles
+  after version bumps or `pkg.clean.state`-less config changes hit it.
+- **feeds update tolerance**: with a persisted workdir the tag-pinned feeds
+  (e.g. `base;vX.Y.Z`) sit on a detached HEAD where `git pull` fails; the
+  update is tolerated with a warning — the checkout is already correct, and a
+  genuinely missing feed still fails the install/compile step.
+- **Ownership**: the SDK compiles as its buildbot uid; after each build a root
+  run of the same image chowns the output back to the host user, and
+  `pkg.clean.tmp` falls back to a root container when an interrupted build
+  left container-owned files behind.
+- **openwrt-feed-builder integration**: the feed builder's `type: sdk` sources
+  drive `pkg.build` / `pkg.sdk.build`, pass merged feeds via
+  `SDK_FEEDS_EXTRA=<file>` (written under `artifacts/feedbuilder/`, cleaned
+  with `pkg.clean.feedbuilder`) and harvest `artifacts/pkg/<version>/tmp`.
 
 # ASU server
 

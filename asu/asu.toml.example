@@ -19,7 +19,7 @@ allow_defaults = true
 repository_allow_list = [
     "https://raw.githubusercontent.com/4IceG/Modem-extras/main/myrepo/",
     "https://openwrt.132lan.ru/packages/",
-    "http://10.99.158.1:80/openwrt/releases/",
+    "http://192.0.2.2:80/openwrt/releases/",
 #    "https://github.com/fantastic-packages/releases/raw/",
 #    "https://raw.githubusercontent.com/routerich/",
 #    "https://raw.githubusercontent.com/4IceG/",

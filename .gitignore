@@ -10,3 +10,7 @@ asu/metadata/
 config.buildinfo*
 __pycache__/
 local.mk
+
+# host-specific configs with internal addresses: keep the .example tracked,
+# the real file local
+/asu/asu.toml
