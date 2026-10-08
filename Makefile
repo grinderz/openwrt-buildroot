@@ -13,9 +13,13 @@ GID := $(shell id -g)
 export GID
 
 
-# local user config (gitignored, see local.mk.example): set OWRT_RELEASE,
-# SRC_TARGET, SRC_SUBTARGET etc there instead of editing this Makefile;
-# CLI variables still win over it
+# host config: ~/.config/openwrt-buildroot/config.mk (dotfiles renders
+# DEPLOY_DEST / ASU_UPSTREAM_CUSTOM from [data.openwrt] in its private toml),
+# then the local user config local.mk (gitignored, see local.mk.example):
+# OWRT_RELEASE, SRC_TARGET, SRC_SUBTARGET etc live there and it overrides
+# config.mk; CLI variables still win over both
+XDG_CONFIG_HOME ?= $(HOME)/.config
+-include $(XDG_CONFIG_HOME)/openwrt-buildroot/config.mk
 -include local.mk
 
 # version selection: make OWRT_RELEASE=<name> ... where versions/<name>.mk exists
@@ -962,7 +966,8 @@ asu.cycle.official.device.%: ## Publish official metadata, build and push offici
 ##@ Deploy Targets
 
 
-# rsync destination (user@host:/path, no trailing slash), set in local.mk
+# rsync destination (user@host:/path, no trailing slash), from
+# ~/.config/openwrt-buildroot/config.mk or local.mk
 DEPLOY_DEST ?=
 # never sent to the host; under --delete (without --delete-excluded) these
 # are also left alone on the receiver
@@ -983,7 +988,7 @@ DEPLOY_RSYNC = rsync -av --delete \
 
 define Deploy/Check
 	@if [ -z "$(DEPLOY_DEST)" ]; then
-		echo " - DEPLOY_DEST not set, add to local.mk:"
+		echo " - DEPLOY_DEST not set, add to ~/.config/openwrt-buildroot/config.mk or local.mk:"
 		echo "   DEPLOY_DEST := user@buildhost:/home/user/src/openwrt-buildroot"
 		exit 1
 	fi
