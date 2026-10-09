@@ -24,12 +24,21 @@ make pkg.htop SRC_TARGET=mediatek SRC_SUBTARGET=filogic
 make pkg.build PKGS="a b c"     # several packages in ONE container run (feeds cloned once)
 make pkg.sdk.<package>          # build a package with the SDK from src build, results in artifacts/pkg/
 make pkg.sdk.build PKGS="a b c" # several packages with the src-build SDK in one run
-make deploy                     # rsync this repo to DEPLOY_DEST (set in local.mk); deploy.diff = dry run
+make deploy                     # rsync this repo to DEPLOY_DEST (~/.config/openwrt-buildroot/config.mk or local.mk); deploy.diff = dry run
 make fetch                      # mirror artifacts/ back from DEPLOY_DEST; fetch.diff = dry run (--delete!)
 ```
 
 Persistent selection: `export OWRT_RELEASE=... SRC_TARGET=... SRC_SUBTARGET=...`
 (e.g. in `.envrc`).
+
+Host and build defaults live in `~/.config/openwrt-buildroot/config.mk`, which
+the dotfiles repo renders from its private toml (`[data.openwrt]`,
+`[data.openwrt.buildroot]`); the Makefile includes it and copies it to
+`local.mk` in the checkout, and `~/.config/openwrt-buildroot/asu.toml` to
+`asu/asu.toml`, whenever the rendered files are newer — make also runs on the
+build host after `make deploy`, which has no `~/.config`. Edit the toml, not
+the copies; without the rendered files hand-kept `local.mk` / `asu/asu.toml`
+work as before.
 
 ## Targets used in this project
 

@@ -22,6 +22,25 @@ XDG_CONFIG_HOME ?= $(HOME)/.config
 -include $(XDG_CONFIG_HOME)/openwrt-buildroot/config.mk
 -include local.mk
 
+# local.mk and asu/asu.toml in the checkout are copies of the dotfiles-rendered
+# ~/.config/openwrt-buildroot/{config.mk,asu.toml}, refreshed whenever those
+# are newer: make also runs on the build host after `make deploy`, which has no
+# ~/.config, and compose mounts ./asu.toml. Edit the dotfiles templates (the
+# private toml), not the copies; without the rendered files hand-kept ones
+# work as before
+XDG_BUILDROOT := $(XDG_CONFIG_HOME)/openwrt-buildroot
+HOST_FILE_DEPS :=
+ifneq ($(wildcard $(XDG_BUILDROOT)/config.mk),)
+HOST_FILE_DEPS += local.mk
+local.mk: $(XDG_BUILDROOT)/config.mk
+	cp "$<" "$@"
+endif
+ifneq ($(wildcard $(XDG_BUILDROOT)/asu.toml),)
+HOST_FILE_DEPS += asu/asu.toml
+asu/asu.toml: $(XDG_BUILDROOT)/asu.toml
+	cp "$<" "$@"
+endif
+
 # version selection: make OWRT_RELEASE=<name> ... where versions/<name>.mk exists
 OWRT_RELEASE ?= 24.10.7
 ifeq ($(wildcard versions/$(OWRT_RELEASE).mk),)
@@ -734,15 +753,15 @@ define Asu/Meta/Finalize
 endef
 
 .PHONY: asu.up
-asu.up: ## Up ASU server with official imagebuilder
+asu.up: $(filter asu/asu.toml,$(HOST_FILE_DEPS)) ## Up ASU server with official imagebuilder
 	$(call Asu/Up,$(ASU_BASE_CONTAINER_OFFICIAL),$(ASU_UPSTREAM_OFFICIAL))
 
 .PHONY: asu.src.up
-asu.src.up: ## Up ASU server with src imagebuilder (push images via asu.push.*)
+asu.src.up: $(filter asu/asu.toml,$(HOST_FILE_DEPS)) ## Up ASU server with src imagebuilder (push images via asu.push.*)
 	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_OFFICIAL))
 
 .PHONY: asu.custom.up
-asu.custom.up: ## Up ASU server with src imagebuilder and own metadata (custom devices)
+asu.custom.up: $(filter asu/asu.toml,$(HOST_FILE_DEPS)) ## Up ASU server with src imagebuilder and own metadata (custom devices)
 	$(call Asu/Up,$(ASU_BASE_CONTAINER_SRC),$(ASU_UPSTREAM_CUSTOM))
 
 # the live openwrt/bin tree only holds the last built target; the src
@@ -995,12 +1014,12 @@ define Deploy/Check
 endef
 
 .PHONY: deploy.diff
-deploy.diff: ## Preview deploy (rsync dry-run: what gets sent/deleted)
+deploy.diff: $(HOST_FILE_DEPS) ## Preview deploy (rsync dry-run: what gets sent/deleted)
 	$(call Deploy/Check)
 	$(DEPLOY_RSYNC) --dry-run
 
 .PHONY: deploy
-deploy: ## Deploy repo to DEPLOY_DEST (host-only paths protected from --delete)
+deploy: $(HOST_FILE_DEPS) ## Deploy repo to DEPLOY_DEST (host-only paths protected from --delete)
 	$(call Deploy/Check)
 	$(DEPLOY_RSYNC)
 
