@@ -6,13 +6,14 @@ ENV GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=
 
 USER root
 
+# no clang: the host llvm/clang is only needed for the BPF toolchain, which
+# generic.mk disables (CONFIG_BPF_TOOLCHAIN_NONE=y, CONFIG_USE_LLVM_BUILD=n)
 RUN <<EOT
 apt-get update
 apt-get install --no-install-recommends --no-install-suggests --yes \
   ca-certificates \
   build-essential \
   ccache \
-  clang \
   flex \
   bison \
   g++ \

@@ -1,0 +1,5 @@
+001-force-vermagic.patch
+002-imagebuilder-copy-wireless-regdb.patch
+003-wireless-regdb-unlock.patch
+004-netgear-fit-rootfs-fallback.patch
+005-securifi-almond-3s.patch

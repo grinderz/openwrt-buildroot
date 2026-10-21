@@ -13,28 +13,32 @@ GID := $(shell id -g)
 export GID
 
 
-# host config: ~/.config/openwrt-buildroot/config.mk (dotfiles renders
-# DEPLOY_DEST / ASU_UPSTREAM_CUSTOM from [data.openwrt] in its private toml),
-# then the local user config local.mk (gitignored, see local.mk.example):
+# host config: ~/.config/openwrt-buildroot/config.mk (DEPLOY_DEST,
+# ASU_UPSTREAM_CUSTOM, release selection), then the local user config
+# local.mk (gitignored, see local.mk.example):
 # OWRT_RELEASE, SRC_TARGET, SRC_SUBTARGET etc live there and it overrides
 # config.mk; CLI variables still win over both
 XDG_CONFIG_HOME ?= $(HOME)/.config
--include $(XDG_CONFIG_HOME)/openwrt-buildroot/config.mk
--include local.mk
-
-# local.mk and asu/asu.toml in the checkout are copies of the dotfiles-rendered
-# ~/.config/openwrt-buildroot/{config.mk,asu.toml}, refreshed whenever those
-# are newer: make also runs on the build host after `make deploy`, which has no
-# ~/.config, and compose mounts ./asu.toml. Edit the dotfiles templates (the
-# private toml), not the copies; without the rendered files hand-kept ones
-# work as before
 XDG_BUILDROOT := $(XDG_CONFIG_HOME)/openwrt-buildroot
+
+# local.mk and asu/asu.toml in the checkout are copies of
+# ~/.config/openwrt-buildroot/{config.mk,asu.toml}, refreshed whenever
+# those are newer: make also runs on the build host after `make deploy`,
+# which has no ~/.config, and compose mounts ./asu.toml. Edit the ~/.config
+# files, not the checkout ones; without ~/.config hand-kept ones work
+# as before.
+# local.mk is refreshed at parse time, before it is included: the remake
+# rule below would only run after the whole Makefile was read, too late when
+# a stale local.mk selects an OWRT_RELEASE whose version file is gone
 HOST_FILE_DEPS :=
 ifneq ($(wildcard $(XDG_BUILDROOT)/config.mk),)
+$(shell [ local.mk -nt "$(XDG_BUILDROOT)/config.mk" ] || cp "$(XDG_BUILDROOT)/config.mk" local.mk)
 HOST_FILE_DEPS += local.mk
 local.mk: $(XDG_BUILDROOT)/config.mk
 	cp "$<" "$@"
 endif
+-include $(XDG_BUILDROOT)/config.mk
+-include local.mk
 ifneq ($(wildcard $(XDG_BUILDROOT)/asu.toml),)
 HOST_FILE_DEPS += asu/asu.toml
 asu/asu.toml: $(XDG_BUILDROOT)/asu.toml
@@ -42,7 +46,7 @@ asu/asu.toml: $(XDG_BUILDROOT)/asu.toml
 endif
 
 # version selection: make OWRT_RELEASE=<name> ... where versions/<name>.mk exists
-OWRT_RELEASE ?= 24.10.7
+OWRT_RELEASE ?= 24.10.8
 ifeq ($(wildcard versions/$(OWRT_RELEASE).mk),)
     $(error unknown OWRT_RELEASE '$(OWRT_RELEASE)', available: $(basename $(notdir $(wildcard versions/*.mk))))
 endif
@@ -60,7 +64,8 @@ SRC_OWRT_GIT ?=
 
 OWRT_BRANCH_SAFE := $(subst /,-,$(OWRT_BRANCH))
 # revision straight from the tree: the native getver.sh needs the full
-# commit history, which src.clone provides via --filter=blob:none
+# commit history, which src.clone keeps (it drops only blobs and the other
+# branches)
 OWRT_GIT_VERSION := $(shell cd $(OWRT_DIR) 2>/dev/null && ./scripts/getver.sh 2>/dev/null || echo unknown)
 
 ifeq ($(OWRT_VERSION_MAJOR_MINOR), master)
@@ -180,6 +185,15 @@ CONFIG_BUILDER_TYPE ?=
 SDK_DOCKER_IMAGE ?=
 SDK_DOCKER_PULL ?=
 
+# third-party repositories: repositories-extra.conf (opkg syntax, see
+# scripts/ib-add-repos.sh) and, for apk imagebuilders (25.12+), *.pem keys
+# from imagebuilder/<ver>/keys, .../profiles/<p>/keys, .../devices/<d>/keys.
+# apk refuses unsigned repositories; with IMG_APK_ALLOW_UNTRUSTED=1 (default,
+# same trust level as the opkg path) the imagebuilder is told to accept them
+# anyway, 0 requires a key for every extra repository
+IMG_APK_ALLOW_UNTRUSTED ?= 1
+IMG_REPOS_SCRIPT := scripts/ib-add-repos.sh
+
 # guard: src targets (except src.docker.*) need OWRT_DIR from a version file
 SRC_GUARDED_GOALS := $(filter-out src.docker.%,$(filter src.% _src.% asu.meta.%,$(MAKECMDGOALS)))
 ifneq ($(SRC_GUARDED_GOALS),)
@@ -215,9 +229,16 @@ help: ## Display this help screen
 		/^[a-zA-Z_0-9\-\\.%]+:.*?##/ { printf "  \033[36m%-29s\033[0m %s\n", $$1, $$2 } \
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+# optional profile/device vars are reset before the include: with several
+# goals in one invocation (make img.device.a img.profile.b) the values of
+# the previous config.mk would otherwise leak into the next one (the tmp
+# dir is recreated per pipeline run for the same reason, see Img/Pipeline)
 define Setup/Vars
 	@echo " - setup vars $(1)"
 	$(if $(wildcard $(1)),,$(error config not found: $(1)))
+	$(eval CONFIG_DEVICE :=)
+	$(eval CONFIG_ROOTFS_PARTSIZE :=)
+	$(eval CONFIG_CUSTOM_PKGS :=)
 	$(eval include $(1))
 endef
 
@@ -226,10 +247,12 @@ endef
 
 
 .PHONY: info
-info:
+info: ## Show resolved version/target variables
 	@echo "OWRT_RELEASE: $(OWRT_RELEASE)"
 	@echo "SRC_TARGET: $(SRC_TARGET)"
 	@echo "SRC_SUBTARGET: $(SRC_SUBTARGET)"
+	@echo "OWRT_DIR: $(OWRT_DIR)"
+	@echo "GIT_REF: $(GIT_REF)"
 	@echo "OWRT_GIT_VERSION: $(OWRT_GIT_VERSION)"
 	@echo "OWRT_VERSION: $(OWRT_VERSION)"
 	@echo "OWRT_VERSION_MAJOR_MINOR: $(OWRT_VERSION_MAJOR_MINOR)"
@@ -248,6 +271,8 @@ info:
 define Img/Make
     @echo " - docker make image"
 	docker run --pull=$(CONFIG_DOCKER_PULL) --rm --user root -v "./$(IMG_TMP_DIR)/":/builder/bin \
+		-v "./$(IMG_REPOS_SCRIPT)":/usr/local/bin/ib-add-repos:ro \
+		-e IB_APK_ALLOW_UNTRUSTED=$(IMG_APK_ALLOW_UNTRUSTED) \
 		-i $(CONFIG_DOCKER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) /bin/bash << EOT
 	set -o errtrace -o pipefail -o noclobber -o errexit -o nounset
 	cleanup() {
@@ -256,11 +281,14 @@ define Img/Make
 
 	trap cleanup EXIT
 
+	# opkg or apk, see scripts/ib-add-repos.sh; only present for the official
+	# builder image (type b), the src/official images have them baked in
 	if [ -f bin/repositories-extra.conf ]; then
-		echo " - custom repositories"
-		cat bin/repositories-extra.conf >> repositories.conf
-		sed -i '/check_signature/d' repositories.conf
+		ib-add-repos bin/repositories-extra.conf bin/keys
 	fi
+	# this run is root: the wget limit the script wrote for buildbot at
+	# image build time (~/.wgetrc) is not read here, repeat it for root
+	grep -qs '^tries' /etc/wgetrc || echo 'tries = 2' >> /etc/wgetrc
 
 	make image \
 		PROFILE=$(CONFIG_PROFILE) \
@@ -272,7 +300,7 @@ endef
 
 define Img/Archive
 	SH_IMG_TARGETS_DIR=$(IMG_TMP_DIR)/targets/$(CONFIG_TARGET)/$(CONFIG_SUBTARGET)
-	
+
 	if [ ! -d "$${SH_IMG_TARGETS_DIR}" ]; then
 		echo " - dir not exists: $${SH_IMG_TARGETS_DIR}"
 		exit 1
@@ -287,20 +315,44 @@ define Img/Archive
 	SH_ARCHIVE_NAME=$${SH_ARCHIVE_NAME}$(if $(CONFIG_DEVICE),-$(CONFIG_DEVICE))-$(CONFIG_BUILDER_TYPE)-$$(date +%F).tar.zst
 	@echo " - archiving: $${SH_ARCHIVE_NAME}"
 
-	tar -C $(IMG_TMP_DIR) --exclude=./repositories-extra.conf -cf - . \
+	tar -C $(IMG_TMP_DIR) --exclude=./repositories-extra.conf --exclude=./keys -cf - . \
 		| zstd $(ARCHIVE_ZSTD_OPTS) -f -o $(IMG_ARTIFACTS_DIR)/$${SH_ARCHIVE_NAME}
 endef
 
+# "dir/." instead of "dir/*": the glob skips dotfiles (root/.ssh etc.) and
+# fails on a dir holding only those
 define Img/Files/Copy
 	@[ -d "${1}" ] || exit 1
-	if [ -d "${1}" ] && [ -n "$$(find "${1}/" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+	if [ -n "$$(find "${1}/" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
 		echo " - setup files: ${1}"
 		mkdir -p "$(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)"
-		cp -rf ${1}/* $(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)/
+		cp -a "${1}/." "$(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)/"
 	fi
 endef
 
+# $(1): destination dir for the collected *.pem apk keys (version, profile,
+# device level, all that exist). The dir is always created and never empty:
+# the Dockerfiles COPY it, and an empty dir does not exist in a build
+# context (imgbuilder.Dockerfile.dockerignore re-includes files only), so
+# .keep pads it; ib-add-repos copies *.pem only. Keys of a previous
+# (failed) run are dropped first: the dir is not recreated per run
+define Img/Keys
+	mkdir -p "$(1)"
+	rm -f "$(1)"/*.pem
+	: >| "$(1)/.keep"
+	for SH_KEYS_SRC in $(IMG_DIR)/keys \
+			$(IMG_DIR)/profiles/$(CONFIG_PROFILE)/keys \
+			$(if $(CONFIG_DEVICE),$(IMG_DIR)/devices/$(CONFIG_DEVICE)/keys); do
+		for SH_KEY in "$${SH_KEYS_SRC}"/*.pem; do
+			[ -f "$${SH_KEY}" ] || continue
+			echo " - apk key: $${SH_KEY}"
+			cp -f "$${SH_KEY}" "$(1)/"
+		done
+	done
+endef
+
 define Img/Repos
+	$(call Img/Keys,$(IMG_TMP_DIR)/keys)
 	SH_REPOS_FILES=""
 	for SH_REPOS_SRC in $(IMG_DIR)/repositories-extra.conf \
 			$(IMG_DIR)/profiles/$(CONFIG_PROFILE)/repositories-extra.conf \
@@ -316,19 +368,21 @@ define Img/Repos
 	fi
 endef
 
+# copy order = precedence: generic, then profile, then device last, so the
+# most specific config wins (same order as Img/Repos)
 define Img/Files
 	if [ -d "$(IMG_GENERIC_FILES_DIR)" ]; then
 		@$(call Img/Files/Copy,$(IMG_GENERIC_FILES_DIR))
 	fi
 
-	SH_DEVICE_FILES_DIR=$(IMG_DIR)/devices/$(CONFIG_DEVICE)/$(IMG_FILES_DIR_NAME)
-	if [ -n "$(CONFIG_DEVICE)" ] && [ -d "$${SH_DEVICE_FILES_DIR}" ]; then
-		@$(call Img/Files/Copy,$${SH_DEVICE_FILES_DIR})
-	fi
-
 	SH_PROFILE_FILES_DIR=$(IMG_DIR)/profiles/$(CONFIG_PROFILE)/$(IMG_FILES_DIR_NAME)
 	if [ -n "$(CONFIG_PROFILE)" ] && [ -d "$${SH_PROFILE_FILES_DIR}" ]; then
 		@$(call Img/Files/Copy,$${SH_PROFILE_FILES_DIR})
+	fi
+
+	SH_DEVICE_FILES_DIR=$(IMG_DIR)/devices/$(CONFIG_DEVICE)/$(IMG_FILES_DIR_NAME)
+	if [ -n "$(CONFIG_DEVICE)" ] && [ -d "$${SH_DEVICE_FILES_DIR}" ]; then
+		@$(call Img/Files/Copy,$${SH_DEVICE_FILES_DIR})
 	fi
 endef
 
@@ -336,6 +390,7 @@ endef
 # empty file means no extra repositories get baked in
 define Img/ReposExtra/File
 	mkdir -p $(IMG_TMP_DIR)
+	$(call Img/Keys,$(IMG_TMP_DIR)/ib-keys)
 	: >| $(IMG_TMP_DIR)/ib-repositories-extra.conf
 	for SH_REPOS_SRC in $(IMG_DIR)/repositories-extra.conf \
 			$(IMG_DIR)/profiles/$(CONFIG_PROFILE)/repositories-extra.conf \
@@ -354,6 +409,8 @@ define Img/Builder/Docker/Build
 		--build-arg SRC_ARTIFACTS_DIR=$(SRC_ARTIFACTS_DIR) \
 		--build-arg SRC_IMG_BUILDER_FILE=$(IMG_BUILDER_FILE_PREFIX)$(CONFIG_TARGET)-$(CONFIG_SUBTARGET).Linux-x86_64.tar.zst \
 		--build-arg IB_REPOS_EXTRA_FILE=$(IMG_TMP_DIR)/ib-repositories-extra.conf \
+		--build-arg IB_KEYS_DIR=$(IMG_TMP_DIR)/ib-keys \
+		--build-arg IB_APK_ALLOW_UNTRUSTED=$(IMG_APK_ALLOW_UNTRUSTED) \
 		.
 endef
 
@@ -368,6 +425,8 @@ define Img/Builder/Official/Docker/Build
 		-f imgbuilder-official.Dockerfile \
 		--build-arg IB_BASE_IMAGE=$(IMG_BUILDER_IMAGE):$(CONFIG_TARGET)-$(CONFIG_SUBTARGET)-$(IMG_BUILDER_IMAGE_TAG) \
 		--build-arg IB_REPOS_EXTRA_FILE=$(IMG_TMP_DIR)/ib-repositories-extra.conf \
+		--build-arg IB_KEYS_DIR=$(IMG_TMP_DIR)/ib-keys \
+		--build-arg IB_APK_ALLOW_UNTRUSTED=$(IMG_APK_ALLOW_UNTRUSTED) \
 		.
 endef
 
@@ -400,10 +459,10 @@ $(IMG_ARTIFACTS_DIR):
 img.clean.tmp: ## Clean tmp dir
 	@rm -rf $(IMG_TMP_DIR)
 
+# files dir always exists (may stay empty): Img/Make passes FILES=bin/files
+# unconditionally and the imagebuilder fails on a missing path
 .PHONY: img.recreate.tmp
 img.recreate.tmp: img.clean.tmp ## Recreate tmp dir
-	# files dir always exists (may stay empty): Img/Make passes FILES=bin/files
-	# unconditionally and the imagebuilder fails on a missing path
 	@mkdir -p $(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)
 
 .PHONY: img.clean.artifacts
@@ -416,18 +475,28 @@ _img.info.%:
 	$(call Img/Info)
 
 # $(1): profiles | devices
+# The tmp dir is recreated inside the recipe, not via the phony
+# img.recreate.tmp prerequisite: make runs a phony prerequisite once per
+# invocation, so with several image goals the files/keys/repos of the
+# first goal would end up in the next image.
+# Img/Repos only for the official builder image (type b): the src/official
+# builder images (s/o) already have the same repositories baked in by
+# their Dockerfiles, appending them again at run time only produces
+# opkg "Duplicate src declaration" warnings
 define Img/Pipeline
+	@rm -rf $(IMG_TMP_DIR)
+	mkdir -p $(IMG_TMP_DIR)/$(IMG_FILES_DIR_NAME)
 	$(call Setup/Vars,$(IMG_DIR)/$(1)/$*/config.mk)
 	$(call Img/Files)
-	$(call Img/Repos)
+	$(if $(filter b,$(CONFIG_BUILDER_TYPE)),$(call Img/Repos))
 	$(call Img/Make)
 	$(call Img/Archive)
 endef
 
-_img.profile.%: img.recreate.tmp
+_img.profile.%:
 	$(call Img/Pipeline,profiles)
 
-_img.device.%: img.recreate.tmp
+_img.device.%:
 	$(call Img/Pipeline,devices)
 
 _img.src.build.profile.%:
@@ -446,11 +515,11 @@ _img.official.build.device.%:
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Img/Builder/Official/Docker/Build)
 
-img.download.pkgs.profile.%:
+img.download.pkgs.profile.%: ## Show official default+device packages for profile
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Img/Download/Pkgs)
 
-img.download.pkgs.device.%:
+img.download.pkgs.device.%: ## Show official default+device packages for device
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Img/Download/Pkgs)
 
@@ -536,6 +605,10 @@ define Sdk/Make
 	if [ -f feeds-extra.conf ]; then
 		echo " - custom feeds"
 		cat feeds.conf.default feeds-extra.conf >| feeds.conf
+	else
+		# the persisted /builder keeps the feeds.conf of an earlier run with
+		# extra feeds; without it the sdk falls back to feeds.conf.default
+		rm -f feeds.conf
 	fi
 
 	# tolerated failures: with a persisted /builder the tag-pinned feeds
@@ -674,6 +747,19 @@ ASU_META_DIR := $(ASU_DIR)/metadata
 # collisions always resolve to the highest version (opkg semantics), so the
 # indexes show exactly what the imagebuilder will install
 ASU_MERGE_INDEXES ?= 1
+# asu/owut only need json metadata, package indexes and the package files
+# themselves; firmware images and builder archives stay out of asu/metadata.
+# the rsync filter is the authoritative whitelist for targets/<t>/<s>/; the
+# tar excludes only keep the archive extraction in asu.meta.publish small
+# (a blacklist, so a new image suffix slips through the extraction, never
+# into the published tree)
+ASU_PUBLISH_RSYNC_FILTER := --include=profiles.json --include='*.manifest' \
+	--include='*.buildinfo' --include=sha256sums --include='packages/***' \
+	--include='kmods/***' --exclude='*'
+ASU_PUBLISH_TAR_EXCLUDES := $(foreach e,'*openwrt-imagebuilder-*' '*openwrt-sdk-*' \
+	'*openwrt-toolchain-*' '*.bin' '*.itb' '*.img' '*.img.gz' '*.trx' '*.chk' \
+	'*.elf' '*.ubi' '*.fip' '*.dtb' '*.vmdk' '*.vdi' '*.qcow2' '*.tar.gz' \
+	'*-initramfs*',--exclude=$(e))
 
 define Asu/Up
 	@mkdir -p $(ASU_DIR)/public/store $(ASU_META_DIR)
@@ -701,6 +787,8 @@ define Asu/Meta/Finalize
 			# the feed name (2nd field) must equal the feed directory name,
 			# asu resolves packages/<arch>/<name>/ from it
 			for SH_FEED_DIR in "$${SH_ARCH_DIR}"*/; do
+				# unmatched glob stays literal: no feed dirs would yield a "*" feed
+				[ -d "$${SH_FEED_DIR}" ] || continue
 				SH_FEED=$$(basename "$${SH_FEED_DIR}")
 				echo "src/gz $${SH_FEED} $(ASU_UPSTREAM_CUSTOM)/$(OWRT_DOWNLOAD_AREA_PATH)/packages/$${SH_ARCH}/$${SH_FEED}" \
 				>> "$${SH_ARCH_DIR}feeds.conf"
@@ -714,7 +802,8 @@ define Asu/Meta/Finalize
 		# disable with ASU_MERGE_INDEXES=0 to publish pure src indexes
 		if [ "$(ASU_MERGE_INDEXES)" = "1" ]; then
 			echo " - merging official feed indexes"
-			python3 scripts/asu-merge-feed-indexes.py "$${SH_META_VERSION_DIR}" \
+			python3 scripts/asu-merge-feed-indexes.py --self-url "$(ASU_UPSTREAM_CUSTOM)" \
+				"$${SH_META_VERSION_DIR}" \
 				"$(OWRT_DOWNLOAD_AREA_URL)/$(OWRT_DOWNLOAD_AREA_PATH)" \
 				$(wildcard $(IMG_DIR)/repositories-extra.conf) \
 			$(wildcard $(IMG_DIR)/profiles/*/repositories-extra.conf) \
@@ -737,12 +826,15 @@ define Asu/Meta/Finalize
 	if [ -n "$(OWRT_VERSION_PATCH)" ]; then
 		echo " - generating .versions.json"
 		cd - > /dev/null
-		# asu needs versions_list; keep previously published versions
+		# asu needs versions_list; keep previously published versions. sorted
+		# numerically per component (plain sort puts 24.10.10 before 24.10.7),
+		# stable_version is the highest one, not the one published last
 		SH_VERSIONS_FILE=$(ASU_META_DIR)/.versions.json
 		SH_OLD_LIST=$$([ -f "$${SH_VERSIONS_FILE}" ] && jq -c '.versions_list // []' "$${SH_VERSIONS_FILE}" || echo '[]')
 		jq -n --arg v "$(OWRT_VERSION)" --argjson old "$${SH_OLD_LIST}" \
-			'{stable_version: $$v, oldstable_version: "", upcoming_version: "",
-		  versions_list: (($$old + [$$v]) | unique)}' >| "$${SH_VERSIONS_FILE}"
+			'(($$old + [$$v]) | unique | sort_by(split(".") | map(tonumber? // 0))) as $$list
+			 | {stable_version: $$list[-1], oldstable_version: "", upcoming_version: "",
+			    versions_list: $$list}' >| "$${SH_VERSIONS_FILE}"
 	fi
 
 	# the bind mount goes stale if $(ASU_META_DIR) was deleted/recreated while
@@ -776,21 +868,12 @@ asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
 		echo " - source archive: $${SH_ARCHIVE}"
 		SH_PUB_TMP=$$(mktemp -d)
 		trap 'rm -rf "$${SH_PUB_TMP}"' EXIT
-		# asu/owut only need json metadata and package indexes; skip
-		# firmware images and builder archives (leading * matches the
-		# ./targets/... path prefix of the tar members)
+		# only this target's dir and the package feeds, minus the big
+		# firmware/builder files (leading * matches the ./targets/... path
+		# prefix of the tar members); the rsync below applies the whitelist
 		zstd -dc "$${SH_ARCHIVE}" | tar -x -C "$${SH_PUB_TMP}" \
-			--exclude '*openwrt-imagebuilder-*' \
-			--exclude '*openwrt-sdk-*' \
-			--exclude '*openwrt-toolchain-*' \
-			--exclude '*.bin' \
-			--exclude '*.itb' \
-			--exclude '*.img' \
-			--exclude '*.img.gz' \
-			--exclude '*.trx' \
-			--exclude '*.chk' \
-			--exclude '*.elf' \
-			--exclude '*-initramfs*'
+			$(ASU_PUBLISH_TAR_EXCLUDES) \
+			./packages ./targets/$(SRC_TARGET)/$(SRC_SUBTARGET)
 		SH_SRC_ROOT=$${SH_PUB_TMP}
 	fi
 
@@ -805,23 +888,20 @@ asu.meta.publish: ## Publish src bin (profiles, packages) to ASU metadata server
 	mkdir -p "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)" "$${SH_META_VERSION_DIR}/packages"
 
 	echo " - publishing targets/$(SRC_TARGET)/$(SRC_SUBTARGET)"
-	rsync -a --delete \
-		--exclude 'openwrt-imagebuilder-*' \
-		--exclude 'openwrt-sdk-*' \
-		--exclude 'openwrt-toolchain-*' \
-		--exclude '*.bin' \
-		--exclude '*.itb' \
-		--exclude '*.img' \
-		--exclude '*.img.gz' \
-		--exclude '*.trx' \
-		--exclude '*.chk' \
-		--exclude '*.elf' \
-		--exclude '*-initramfs*' \
+	# --delete-excluded: files a previous publish let through (before the
+	# whitelist) are removed from the served tree as well
+	rsync -a --delete --delete-excluded $(ASU_PUBLISH_RSYNC_FILTER) \
 		"$${SH_SRC_TARGETS_DIR}/" "$${SH_META_VERSION_DIR}/targets/$(SRC_TARGET)/$(SRC_SUBTARGET)/"
 
-	if [ -d "$${SH_SRC_ROOT}/packages" ]; then
-		echo " - publishing packages feeds"
-		rsync -a "$${SH_SRC_ROOT}/packages/" "$${SH_META_VERSION_DIR}/packages/"
+	# bin/packages holds every arch ever built in this tree (and so does the
+	# archive): publish only this target's arch, otherwise the stale local
+	# indexes of the other arches overwrite their merged ones and owut sees
+	# sparse feeds until the next merge
+	SH_ARCH=$$(jq -r '.arch_packages' "$${SH_SRC_TARGETS_DIR}/profiles.json")
+	if [ -d "$${SH_SRC_ROOT}/packages/$${SH_ARCH}" ]; then
+		echo " - publishing packages/$${SH_ARCH} feeds"
+		mkdir -p "$${SH_META_VERSION_DIR}/packages/$${SH_ARCH}"
+		rsync -a "$${SH_SRC_ROOT}/packages/$${SH_ARCH}/" "$${SH_META_VERSION_DIR}/packages/$${SH_ARCH}/"
 	fi
 
 	$(call Asu/Meta/Finalize)
@@ -901,6 +981,14 @@ asu.destroy: ## Destroy ASU server including volumes (registry, redis, podman st
 asu.logs: ## Tail ASU server logs
 	$(ASU_COMPOSE) logs -f --tail=100
 
+# every asu.push.* under an existing tag leaves the previous manifest and
+# its layers untagged in registry-data; the registry never reclaims them on
+# its own. the restart drops the registry's in-memory blob cache after gc
+.PHONY: asu.registry.gc
+asu.registry.gc: ## Delete untagged images/blobs from the ASU registry volume
+	@$(ASU_COMPOSE) exec -T registry registry garbage-collect --delete-untagged /etc/docker/registry/config.yml
+	$(ASU_COMPOSE) restart registry
+
 asu.push.profile.%: ## Push src imagebuilder image for profile to ASU registry
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Asu/Push)
@@ -915,11 +1003,11 @@ asu.push.device.%: ## Push src imagebuilder image for device to ASU registry
 # them with the config's CONFIG_TARGET/CONFIG_SUBTARGET instead
 _asu.publish.profile.%:
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
-	@MAKEFLAGS= $(MAKE) asu.meta.publish SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+	@$(MAKE) asu.meta.publish SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
 
 _asu.publish.device.%:
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
-	@MAKEFLAGS= $(MAKE) asu.meta.publish SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+	@$(MAKE) asu.meta.publish SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
 
 # refuse BEFORE mirroring: publish.official overwrites the src-published
 # profiles.json of the target, so running the official cycle for a device
@@ -938,47 +1026,51 @@ endef
 _asu.publish.official.profile.%:
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Asu/Official/ProfileGuard)
-	MAKEFLAGS= $(MAKE) asu.meta.publish.official SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+	$(MAKE) asu.meta.publish.official SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
 
 _asu.publish.official.device.%:
 	$(call Setup/Vars,$(IMG_DIR)/devices/$*/config.mk)
 	$(call Asu/Official/ProfileGuard)
-	MAKEFLAGS= $(MAKE) asu.meta.publish.official SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
+	$(MAKE) asu.meta.publish.official SRC_TARGET=$(CONFIG_TARGET) SRC_SUBTARGET=$(CONFIG_SUBTARGET)
 
 # order matters: metadata must be published and served before img.src.* —
 # its opkg resolves the local_core repo from the metadata server, an empty
 # one 404s and the image build dies on missing core packages if the official
 # mirror flakes at the same time. sequenced via sub-makes in the recipe:
 # make builds explicit-target prerequisites BEFORE pattern-derived ones,
-# so a prerequisite list would run asu.custom.up first
+# so a prerequisite list would run asu.custom.up first.
+# Recursive calls into this Makefile keep MAKEFLAGS: command-line overrides
+# (make ... OWRT_RELEASE=25.12.6) travel in it, "MAKEFLAGS= $(MAKE)" silently
+# drops them and the sub-make falls back to local.mk (only the OpenWrt
+# tree is invoked with a cleared MAKEFLAGS).
 asu.cycle.profile.%: ## Publish metadata, build and push src imagebuilder for profile (run src.all first)
-	@MAKEFLAGS= $(MAKE) _asu.publish.profile.$*
-	MAKEFLAGS= $(MAKE) asu.custom.up
-	MAKEFLAGS= $(MAKE) img.src.profile.$*
-	MAKEFLAGS= $(MAKE) asu.push.profile.$*
+	@$(MAKE) _asu.publish.profile.$*
+	$(MAKE) asu.custom.up
+	$(MAKE) img.src.profile.$*
+	$(MAKE) asu.push.profile.$*
 	@echo " - asu cycle done: $*"
 
 asu.cycle.device.%: ## Publish metadata, build and push src imagebuilder for device (run src.all first)
-	@MAKEFLAGS= $(MAKE) _asu.publish.device.$*
-	MAKEFLAGS= $(MAKE) asu.custom.up
-	MAKEFLAGS= $(MAKE) img.src.device.$*
-	MAKEFLAGS= $(MAKE) asu.push.device.$*
+	@$(MAKE) _asu.publish.device.$*
+	$(MAKE) asu.custom.up
+	$(MAKE) img.src.device.$*
+	$(MAKE) asu.push.device.$*
 	@echo " - asu cycle done: $*"
 
 # official-device variant: no src build, official imagebuilder base with
 # baked third-party repos, metadata mirrored from downloads.openwrt.org
 asu.cycle.official.profile.%: ## Publish official metadata, build and push official-based imagebuilder for profile
-	@MAKEFLAGS= $(MAKE) _asu.publish.official.profile.$*
-	MAKEFLAGS= $(MAKE) asu.custom.up
-	MAKEFLAGS= $(MAKE) img.official.profile.$*
-	MAKEFLAGS= $(MAKE) asu.push.profile.$*
+	@$(MAKE) _asu.publish.official.profile.$*
+	$(MAKE) asu.custom.up
+	$(MAKE) img.official.profile.$*
+	$(MAKE) asu.push.profile.$*
 	@echo " - asu official cycle done: $*"
 
 asu.cycle.official.device.%: ## Publish official metadata, build and push official-based imagebuilder for device
-	@MAKEFLAGS= $(MAKE) _asu.publish.official.device.$*
-	MAKEFLAGS= $(MAKE) asu.custom.up
-	MAKEFLAGS= $(MAKE) img.official.device.$*
-	MAKEFLAGS= $(MAKE) asu.push.device.$*
+	@$(MAKE) _asu.publish.official.device.$*
+	$(MAKE) asu.custom.up
+	$(MAKE) img.official.device.$*
+	$(MAKE) asu.push.device.$*
 	@echo " - asu official cycle done: $*"
 
 
@@ -1059,6 +1151,37 @@ src.docker.shell: ## Src builder container shell access
 	docker compose exec -it srcbuilder /bin/fish
 
 
+# images this repo builds or pulls: the compose services are removed with
+# their own images (--rmi all), this pattern covers the rest
+DOCKER_CLEAN_IMAGES := ^(localhost:5001/)?(varch/openwrt-(imagebuilder|sdkbuilder|srcbuilder)|varch/asu-worker|quay.io/openwrt/imagebuilder|openwrt/asu):
+YES ?=
+
+.PHONY: docker.clean.all
+docker.clean.all: ## Remove every container, volume, image and build cache of this repo (asks first; YES=1 skips the prompt)
+	@SH_IMAGES=$$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '$(DOCKER_CLEAN_IMAGES)' || :)
+	SH_VOLUMES=$$(docker volume ls -q --filter name=owrt-pkg- || :)
+	echo "Going to remove:"
+	echo "  - compose project openwrt-buildroot: srcbuilder container, volumes, image"
+	echo "  - compose project asu: all 7 containers, data volumes (registry, redis, podman), images"
+	echo "  - sdk state volumes:$${SH_VOLUMES:+$$'\n'}$$(echo "$${SH_VOLUMES}" | sed '/^$$/d; s/^/      /')"
+	echo "  - images:$${SH_IMAGES:+$$'\n'}$$(echo "$${SH_IMAGES}" | sed '/^$$/d; s/^/      /')"
+	echo "  - dangling images, anonymous volumes and the build cache of the default builder (docker-wide)"
+	echo "Kept: openwrt source trees and artifacts/ (src.clean.owrt, *.clean.artifacts)"
+	if [ "$(YES)" != 1 ]; then
+		read -r -p "Continue? [y/N] " SH_ANSWER || SH_ANSWER=
+		case "$${SH_ANSWER}" in y|Y) ;; *) echo " - aborted"; exit 1 ;; esac
+	fi
+	docker compose down -v --rmi all --remove-orphans
+	$(ASU_COMPOSE) down -v --rmi all --remove-orphans
+	docker volume ls -q --filter name=owrt-pkg- | xargs -r docker volume rm
+	# listed again: the compose steps removed part of them
+	docker images --format '{{.Repository}}:{{.Tag}}' | { grep -E '$(DOCKER_CLEAN_IMAGES)' || :; } | xargs -r docker rmi -f
+	docker image prune -f
+	docker volume prune -f
+	docker builder prune -af
+	docker system df
+
+
 ##@ Source Builder Targets
 
 
@@ -1075,17 +1198,27 @@ src.clean.owrt: ## Delete openwrt dir
 
 .PHONY: src.clone
 src.clone: ## Src clone openwrt
-	# full history but no old blobs: PKG_RELEASE of base-files (and other
-	# COMMITCOUNT users) needs the commit count, a shallow clone yields "1"
-	# and every such package looks older than the official builds
-	@for SH_TRY in 1 2 3; do
-		git clone --filter=blob:none --branch $(GIT_REF) $(SRC_OWRT_GIT) $(OWRT_DIR) && break
+	# full history of the one ref, no old blobs: PKG_RELEASE of base-files
+	# (and other COMMITCOUNT users) is the commit count of the package dir,
+	# a shallow clone yields "1" and the package loses to the official
+	# build in the imagebuilder. The filter needs a server that supports
+	# partial clone (github.com does, git.openwrt.org ignores it and sends
+	# the full pack, ~3x the size)
+	@SH_CLONE_LOG=$$(mktemp)
+	for SH_TRY in 1 2 3; do
+		if git clone --filter=blob:none --single-branch --branch $(GIT_REF) $(SRC_OWRT_GIT) $(OWRT_DIR) 2>&1 | tee "$${SH_CLONE_LOG}" >&2; then
+			if grep -q 'filtering not recognized' "$${SH_CLONE_LOG}"; then
+				echo " - warning: $(SRC_OWRT_GIT) ignored --filter=blob:none, full clone"
+			fi
+			break
+		fi
 		# partial clone dir blocks the next attempt
 		rm -rf "$(OWRT_DIR)"
-		[ "$${SH_TRY}" -lt 3 ] || { echo " - clone failed after 3 tries"; exit 1; }
+		[ "$${SH_TRY}" -lt 3 ] || { rm -f "$${SH_CLONE_LOG}"; echo " - clone failed after 3 tries"; exit 1; }
 		echo " - clone failed, retrying ($${SH_TRY}/3)"
 		sleep 5
 	done
+	rm -f "$${SH_CLONE_LOG}"
 
 	# releases: pin REVISION via the version file to the official value —
 	# the release tag commit itself yields a different r-number/hash, and
@@ -1210,7 +1343,9 @@ src.download.vermagic: ## Src download vermagic info
 src.validate.vermagic: ## Src validate vermagic
 	@$(call Setup/Vars,$(SRC_TARGETS_DIR)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.mk)
 
-	cat $(OWRT_DIR)/build_dir/target-*/linux-*/linux-*/.vermagic
+	# informational only; an unmatched glob (no kernel built yet) must not
+	# abort before the manifest check below reports the real state
+	find $(OWRT_DIR)/build_dir -maxdepth 4 -path '*/linux-*/.vermagic' -exec cat {} + 2>/dev/null || :
 
 	VERMAGIC=$$(grep -m1 -Eo '[0-9a-f]{32}' \
 		"$(SRC_BINARY_TARGETS_DIR)/openwrt-$(addsuffix -,$(MANIFEST_VERSION))$(SRC_TARGET)-$(SRC_SUBTARGET).manifest" || :)
@@ -1307,3 +1442,104 @@ src.all: src.check.umask src.install.feeds _src.all.base ## Src all
 
 .PHONY: src.all.nofeeds
 src.all.nofeeds: src.check.umask _src.all.base  ## Src all wo feeds
+
+##@ Test Targets
+
+BATS_DIR ?= tests/bats
+
+.PHONY: test
+test: test.bats ## Run all tests (no docker, no network)
+
+.PHONY: test.bats
+test.bats: ## Run the bats shell tests from BATS_DIR (ARGS=... for bats flags)
+	bats $(ARGS) $(BATS_DIR)
+
+##@ Lint Targets
+
+PRE_COMMIT_VERSION ?= 4.7.0
+PRE_COMMIT ?= uvx pre-commit@$(PRE_COMMIT_VERSION)
+RUFF ?= uvx ruff
+# hadolint is not packaged everywhere, docker is a requirement anyway
+HADOLINT_IMAGE ?= hadolint/hadolint:v2.15.1
+# build trees, artifacts and served metadata are not ours to lint
+SHELLCHECK_EXCLUDE := -path ./.git -o -path ./artifacts -o -path ./openwrt -o -path './openwrt-*' \
+	-o -path ./asu/metadata -o -path ./asu/public
+
+.PHONY: lint
+lint: lint.shellcheck lint.ruff lint.hadolint lint.compose lint.pre-commit ## Run all linters
+
+.PHONY: lint.shellcheck
+lint.shellcheck: ## Run shellcheck on the repo's shell scripts
+	find . \( $(SHELLCHECK_EXCLUDE) \) -prune -o -type f -name '*.sh' \
+		-exec shellcheck --format=gcc {} +
+
+.PHONY: lint.ruff
+lint.ruff: ## Run ruff check + format check on scripts/*.py (ruff.toml)
+	$(RUFF) check scripts
+	$(RUFF) format --check scripts
+
+.PHONY: lint.ruff.fix
+lint.ruff.fix: ## Apply ruff fixes and formatting to scripts/*.py
+	$(RUFF) check --fix scripts
+	$(RUFF) format scripts
+
+.PHONY: lint.hadolint
+lint.hadolint: ## Run hadolint on every Dockerfile (.hadolint.yaml)
+	for f in *.Dockerfile asu/*.Dockerfile; do
+		echo "== $$f"
+		docker run --rm -i -v "$(CURDIR)/.hadolint.yaml":/.config/hadolint.yaml:ro \
+			$(HADOLINT_IMAGE) < "$$f"
+	done
+
+# UID/GID (build args of srcbuilder) are exported above, asu/.env supplies
+# the image tags; a missing asu/asu.toml bind source does not fail config
+.PHONY: lint.compose
+lint.compose: ## Validate the compose files (docker compose config)
+	docker compose -f docker-compose.yaml config -q
+	docker compose -f asu/docker-compose.yaml config -q
+
+.PHONY: lint.pre-commit
+lint.pre-commit: ## Run the pre-commit hooks on every file
+	$(PRE_COMMIT) run --all-files
+
+##@ CI Targets
+
+# .github/workflows/build.yml: manual full cycle on GitHub-hosted runners
+# (src build per target + img.src.profile.* images), products as artifacts
+CI_WORKFLOW ?= build.yml
+CI_DL_DIR ?= $(ARTIFACTS_DIR)/ci
+RUN ?=
+# a literal $(MAKE) in a recipe makes `make -n` execute that recipe for
+# real (and the inner make would print instead of answer); the indirection
+# keeps ci.download a plain dry-run
+SUBMAKE := $(MAKE)
+
+.PHONY: ci.run
+ci.run: ## Trigger the Build workflow (ARGS="-f versions=... -f targets=... -f images=false")
+	gh workflow run $(CI_WORKFLOW) $(ARGS)
+
+.PHONY: ci.runs
+ci.runs: ## List the recent Build workflow runs (ids for ci.download)
+	gh run list --workflow $(CI_WORKFLOW) --limit 10
+
+# artifact names: src__<OWRT_RELEASE>__<target>-<subtarget>, img__...
+# ("__" because releases may contain "-"); gh unpacks each into a dir of
+# that name, the files go to artifacts/{src,img}/<CONFIG_DIR_VERSION> of
+# that release (not the release name: master-almond3s -> master), where
+# the img.src.* / asu.* targets look for them
+.PHONY: ci.download
+ci.download: ## Download the artifacts of RUN=<run id> into artifacts/src and artifacts/img
+	@[ -n "$(RUN)" ] || { echo "usage: make ci.download RUN=<run id> (see ci.runs)" >&2; exit 1; }
+	gh run download $(RUN) --dir "$(CI_DL_DIR)/$(RUN)"
+	for SH_DIR in "$(CI_DL_DIR)/$(RUN)"/src__*/ "$(CI_DL_DIR)/$(RUN)"/img__*/; do
+		[ -d "$${SH_DIR}" ] || continue
+		SH_NAME=$$(basename "$${SH_DIR}")
+		SH_KIND=$${SH_NAME%%__*}
+		SH_RELEASE=$$(awk -F'__' '{print $$2}' <<< "$${SH_NAME}")
+		SH_VERSION=$$($(SUBMAKE) -s info OWRT_RELEASE="$${SH_RELEASE}" | awk -F': ' '$$1 == "CONFIG_DIR_VERSION" {print $$2}')
+		SH_DEST=$(ARTIFACTS_DIR)/$${SH_KIND}/$${SH_VERSION}
+		mkdir -p "$${SH_DEST}"
+		cp -f "$${SH_DIR}"* "$${SH_DEST}/"
+		echo " - $${SH_NAME} -> $${SH_DEST}/ ($$(ls "$${SH_DIR}" | wc -l) files)"
+	done
+	rm -rf "$(CI_DL_DIR)/$(RUN)"

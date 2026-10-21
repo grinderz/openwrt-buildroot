@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # shellcheck, docker and go (gitleaks hook) come with the ubuntu runner,
+  # uvx runs ruff and pre-commit
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+
+      - name: shellcheck
+        run: make lint.shellcheck
+
+      - name: ruff
+        run: make lint.ruff
+
+      - name: hadolint
+        run: make lint.hadolint
+
+      - name: compose
+        run: make lint.compose
+
+      - name: pre-commit
+        run: make lint.pre-commit
+
+  # bats tests: scripts/ib-add-repos.sh against fake opkg/apk imagebuilder
+  # trees (the apk path has no public third-party repository to build with)
+  # and scripts/ci-matrix.sh
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install bats
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends bats
+
+      - name: bats
+        run: make test.bats ARGS=--print-output-on-failure
+
+  # the Makefile is the product: parse it for every version and dry-run the
+  # main pipelines (no docker, no sources needed)
+  make-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: info per version
+        run: |
+          for v in versions/*.mk; do
+            v=$(basename "$v" .mk)
+            echo "== $v"
+            make info OWRT_RELEASE="$v"
+          done
+
+      # src.build.config / src.build enter the OpenWrt tree with a cleared
+      # MAKEFLAGS (-n does not reach the sub-make), so of the src pipeline
+      # only the quilt step is dry-run; asu.cycle.* is left out as well:
+      # its $(MAKE) steps run under -n and the publish guard fetches
+      # profiles.json from downloads.openwrt.org
+      - name: dry-run pipelines
+        run: |
+          make -n src.patch SRC_TARGET=mediatek SRC_SUBTARGET=filogic > /dev/null
+          make -n img.profile.rpi-4 > /dev/null
+          make -n img.src.profile.securifi_almond-3s OWRT_RELEASE=25.12.6 > /dev/null
+          make -n img.official.device.demo-lec-7233 > /dev/null
+          make -n asu.meta.publish.official SRC_TARGET=x86 SRC_SUBTARGET=64 > /dev/null
+          make -n pkg.htop > /dev/null
+
+  # srcbuilder/<ver>/patches must still apply to the pinned tag. A shallow
+  # clone is enough for quilt (src.clone keeps the full history on purpose: the
+  # commit count feeds PKG_RELEASE, irrelevant here)
+  patches-apply:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['24.10.8', '25.12.6']
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install quilt
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends quilt
+
+      - name: clone the pinned tag
+        run: |
+          dir=$(make -s info OWRT_RELEASE=${{ matrix.version }} | awk -F': ' '$1 == "OWRT_DIR" {print $2}')
+          ref=$(make -s info OWRT_RELEASE=${{ matrix.version }} | awk -F': ' '$1 == "GIT_REF" {print $2}')
+          echo "$ref -> $dir"
+          git clone --depth 1 --branch "$ref" https://github.com/openwrt/openwrt.git "$dir"
+
+      - name: apply patches
+        run: make src.patch OWRT_RELEASE=${{ matrix.version }}
+
+  # end-to-end image build with the official imagebuilder image: opkg path
+  # (24.10, version-level repositories-extra.conf through ib-add-repos) and
+  # the 25.12 apk imagebuilder with custom packages (no extra repos there,
+  # the apk path of ib-add-repos is covered by tests/bats). Profiles whose
+  # repositories-extra.conf points at private hosts are not built here
+  imagebuilder:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '24.10.8'
+            target: img.profile.rpi-4
+          - version: '25.12.6'
+            target: img.profile.cudy_ap3000-v1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install zstd
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends zstd
+
+      - name: build image
+        run: make ${{ matrix.target }} OWRT_RELEASE=${{ matrix.version }}
+
+      - name: upload manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: manifest-${{ matrix.version }}-${{ matrix.target }}
+          path: |
+            artifacts/img/${{ matrix.version }}/tmp/targets/**/*.manifest
+            artifacts/img/${{ matrix.version }}/tmp/targets/**/sha256sums
+          if-no-files-found: error

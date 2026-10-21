@@ -1,0 +1,5 @@
+**
+
+!artifacts/img/*/tmp/ib-repositories-extra.conf
+!artifacts/img/*/tmp/ib-keys/**
+!scripts/ib-add-repos.sh

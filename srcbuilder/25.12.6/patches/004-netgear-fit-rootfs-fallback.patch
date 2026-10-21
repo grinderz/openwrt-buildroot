@@ -1,0 +1,28 @@
+mediatek/filogic: netgear FIT kernel: fall back to the shared rootfs
+
+With CONFIG_IB=y image.mk builds the kernel image of EVERY device of the
+subtarget (the imagebuilder ships them), not only of the selected ones.
+netgear_eax17 (new in 25.12) embeds a rootfs node into its kernel FIT and
+with CONFIG_TARGET_PER_DEVICE_ROOTFS=y that reads
+root.squashfs+pkg=<ROOTFS_ID>, which only exists for selected devices:
+for an unselected eax17 ROOTFS_ID is empty, gen_netgear_rootfs_node.sh
+gets a missing file and mkimage fails with "syntax error" on the .its,
+breaking target/linux install for any filogic config that does not select
+netgear_eax17 (buildbots select all profiles and never hit this).
+
+Use the shared root.squashfs when the per-device one does not exist; the
+imagebuilder re-runs the KERNEL recipe with the real rootfs anyway.
+
+--- a/target/linux/mediatek/image/filogic.mk
++++ b/target/linux/mediatek/image/filogic.mk
+@@ -10,7 +10,9 @@
+ 
+ define Build/fit-with-netgear-top-level-rootfs-node
+ 	$(call Build/fit-its,$(1))
+-	$(TOPDIR)/scripts/gen_netgear_rootfs_node.sh $(KERNEL_BUILD_DIR)/root.squashfs$(if $(TARGET_PER_DEVICE_ROOTFS),+pkg=$(ROOTFS_ID/$(DEVICE_NAME))) > $@.rootfs
++	rootfs="$(KERNEL_BUILD_DIR)/root.squashfs$(if $(TARGET_PER_DEVICE_ROOTFS),+pkg=$(ROOTFS_ID/$(DEVICE_NAME)))"; \
++	[ -f "$$rootfs" ] || rootfs="$(KERNEL_BUILD_DIR)/root.squashfs"; \
++	$(TOPDIR)/scripts/gen_netgear_rootfs_node.sh "$$rootfs" > $@.rootfs
+ 	awk '/configurations/ { system("cat $@.rootfs") } 1' $@.its > $@.its.tmp
+ 	@mv -f $@.its.tmp $@.its
+ 	@rm -f $@.rootfs

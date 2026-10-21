@@ -3,13 +3,63 @@
 # Requirements
 
 - make >= 4.4.x
-- tar, zstd (artifact archiving)
-- wget, curl, jq, rsync, quilt
-- docker with compose plugin (imagebuilder, sdk, asu targets)
+- git, curl, jq, rsync, quilt
+- tar, zstd, zip (artifact archiving)
+- python3 >= 3.12 (asu feed index merge)
+- docker with compose plugin and BuildKit (imagebuilder, sdk, asu targets)
+- lint/test only: shellcheck, bats, uv (`uvx` runs ruff and pre-commit), go (gitleaks hook); `gh` for the ci.* targets
+
+# Lint and test
+
+```
+make lint                # shellcheck, ruff, hadolint (docker), compose config, pre-commit hooks
+make lint.ruff.fix       # apply ruff fixes/formatting to scripts/*.py
+make test                # bats: tests/bats/*.bats (ib-add-repos.sh against fake opkg/apk trees, ci-matrix.sh)
+```
+
+Config: `.editorconfig`, `ruff.toml`, `.hadolint.yaml`, `.pre-commit-config.yaml`
+(generic hooks + gitleaks; quilt patches and router `files/` are excluded
+from the whitespace fixers). Renovate (`renovate.json`) keeps the tooling
+pins current: workflow actions, pre-commit hook revs, `PRE_COMMIT_VERSION` /
+`HADOLINT_IMAGE` in the Makefile, the ubuntu base of srcbuilder and the asu
+stack images in `asu/.env`; OpenWrt releases are bumped by hand. GitHub Actions (`.github/workflows/ci.yml`), on
+push to master and pull requests: the same linters, `make test`, a Makefile
+smoke test (`make info` per version, `make -n` of the image/asu/pkg pipelines), a quilt
+check of `srcbuilder/<ver>/patches` against a shallow clone of the pinned tag
+(`make src.patch`), and real image builds with the official imagebuilder
+(rpi-4 24.10.8 for opkg, cudy_ap3000-v1 25.12.6 for apk; profiles with private
+repositories stay local).
+
+# CI full cycle (manual)
+
+`.github/workflows/build.yml` (`workflow_dispatch` only) runs the src build of
+every `srcbuilder/<ver>/targets/<t>/<s>` of the selected versions, one
+GitHub-hosted job per target in parallel (4 vCPU, 6 h limit: a cold build is
+expected to take a few hours, the first run measures it), then
+`img.src.profile.<name>` for the profiles of that target in the same job.
+Devices (`imagebuilder/<ver>/devices`) are not built there: their custom
+packages come from private hosts (profiles with private repositories build
+with opkg/apk warnings). The matrix comes from
+`scripts/ci-matrix.sh <versions> <targets>`.
+
+```
+make ci.run                                   # defaults: versions "24.10.8 25.12.6", all targets, images on
+make ci.run ARGS="-f versions=25.12.6 -f targets=ramips/mt7621 -f images=false"
+make ci.runs                                  # run ids
+make ci.download RUN=<id>                     # artifacts -> artifacts/src/<ver>/ and artifacts/img/<ver>/
+make img.src.device.rtr3-almond-s3 OWRT_RELEASE=24.10.8      # local builds from the CI products
+make asu.cycle.device.rtr1-gl-mt6000 OWRT_RELEASE=24.10.8
+```
+
+Artifacts per target: `src__<ver>__<t>-<s>` (imagebuilder, SDK, the full
+`openwrt-<ver>-<t>-<s>-<date>.tar.zst` that `asu.meta.publish` reads, profile
+zips; ~1 GB) and `img__<ver>__<t>-<s>` (image archives). Retention is an
+input (default 7 days). Needs `gh` logged in. No caches in CI: the runs are
+manual and rare, a GitHub cache expires after 7 days unused.
 
 # Usage
 
-Version is selected via `OWRT_RELEASE` (default `24.10.7`), one file per version
+Version is selected via `OWRT_RELEASE` (default `24.10.8`), one file per version
 in `versions/`. Source target/subtarget via `SRC_TARGET`/`SRC_SUBTARGET`
 (default `ramips/mt7621`):
 
@@ -31,27 +81,37 @@ make fetch                      # mirror artifacts/ back from DEPLOY_DEST; fetch
 Persistent selection: `export OWRT_RELEASE=... SRC_TARGET=... SRC_SUBTARGET=...`
 (e.g. in `.envrc`).
 
-Host and build defaults live in `~/.config/openwrt-buildroot/config.mk`, which
-the dotfiles repo renders from its private toml (`[data.openwrt]`,
-`[data.openwrt.buildroot]`); the Makefile includes it and copies it to
-`local.mk` in the checkout, and `~/.config/openwrt-buildroot/asu.toml` to
-`asu/asu.toml`, whenever the rendered files are newer — make also runs on the
-build host after `make deploy`, which has no `~/.config`. Edit the toml, not
-the copies; without the rendered files hand-kept `local.mk` / `asu/asu.toml`
-work as before.
+Host and build defaults live in `~/.config/openwrt-buildroot/config.mk` and
+`asu.toml` (keep them in your dotfiles; release selection and
+`repository_allow_list` change with every version bump). The Makefile includes
+`config.mk` and copies it to `local.mk` in the checkout, and `asu.toml` to
+`asu/asu.toml`, whenever the `~/.config` files are newer — make also runs on
+the build host after `make deploy`, which has no `~/.config`. Edit the
+`~/.config` files, not the copies; without `~/.config` hand-kept `local.mk` /
+`asu/asu.toml` work as before.
+
+## Cleanup
+
+`make docker.clean.all` lists everything docker-side this repo created
+(both compose projects with their volumes and images, incl. the asu
+registry/redis/podman data, the `owrt-pkg-*` sdk state volumes, the
+imagebuilder/sdk/srcbuilder images, then dangling images, anonymous volumes
+and the default builder cache) and asks before removing it; `YES=1` skips the
+prompt. Source trees and `artifacts/` stay: `src.clean.owrt`,
+`src.clean.artifacts`, `img.clean.artifacts`, `pkg.clean.artifacts`.
 
 ## Targets used in this project
 
 | `SRC_TARGET/SRC_SUBTARGET` | srcbuilder configs | imagebuilder profiles / devices |
 |----------------------------|--------------------|---------------------------------|
-| `ramips/mt7621` (default)  | 24.10.7, 25.12.5, master | asus_rt-n56u-b1; securifi_almond-3s (24.10.7/25.12.5 via patch, master); device: rtr3-almond-s3 |
-| `mediatek/filogic`         | 24.10, 24.10.7, 25.12, 25.12.5, master | cudy_ap3000-v1, cudy_m3000-v1, cudy_m3000-v2-yt8821 (master), cudy_tr3000-256mb-v1, cudy_tr3000-v1-ubootmod, xiaomi_mi-router-ax3000t-ubootmod; device: rtr1-gl-mt6000 |
-| `bcm27xx/bcm2710`          | 24.10.7            | rpi-3; device: nut-rpi-3 |
-| `bcm27xx/bcm2711`          | 24.10.7            | rpi-4 |
-| `bcm47xx/mips74k`          | 24.10.7            | netgear_wnr3500l-v1-na |
-| `rockchip/armv8`           | 24.10.7            | friendlyarm_nanopi-r3s |
-| `sunxi/cortexa53`          | 24.10.7            | xunlong_orangepi-zero3 |
-| `x86/64`                   | 24.10.7            | generic; device: demo-lec-7233 |
+| `ramips/mt7621` (default)  | 24.10.8, 25.12.6, master | asus_rt-n56u-b1; securifi_almond-3s (24.10.8/25.12.6 via patch, master); device: rtr3-almond-s3 |
+| `mediatek/filogic`         | 24.10, 24.10.8, 25.12, 25.12.6, master | cudy_ap3000-v1, cudy_m3000-v1, cudy_m3000-v2-yt8821 (master), cudy_tr3000-256mb-v1, cudy_tr3000-v1-ubootmod, glinet_gl-mt6000, xiaomi_mi-router-ax3000t-ubootmod; device: rtr1-gl-mt6000 |
+| `bcm27xx/bcm2710`          | 24.10.8            | rpi-3; device: nut-rpi-3 |
+| `bcm27xx/bcm2711`          | 24.10.8            | rpi-4 |
+| `bcm47xx/mips74k`          | 24.10.8            | netgear_wnr3500l-v1-na |
+| `rockchip/armv8`           | 24.10.8            | friendlyarm_nanopi-r3s |
+| `sunxi/cortexa53`          | 24.10.8            | xunlong_orangepi-zero3 |
+| `x86/64`                   | 24.10.8            | generic; device: demo-lec-7233 |
 
 # Custom feeds / repositories
 
@@ -60,14 +120,31 @@ work as before.
   by `src.install.feeds`. See `feeds-extra.conf.example`.
 - imagebuilder: `repositories-extra.conf` from `imagebuilder/<version>/`,
   `.../profiles/<name>/` and `.../devices/<name>/` are **concatenated** in
-  that order (all that exist, not first-match) and appended to
-  `repositories.conf` inside the container (signature check is disabled when
-  custom repos are present). Overlapping lines produce harmless
-  "Duplicate src declaration" opkg warnings — keep each repo in one file.
+  that order (all that exist, not first-match) and added to the imagebuilder
+  by `scripts/ib-add-repos.sh` (at run time for `img.*`, baked into the image
+  for `img.src.*` / `img.official.*`). Lines are always opkg syntax
+  (`src/gz <name> <url>`, the name keys the asu index merge):
+  - opkg (up to 24.10): appended to `repositories.conf`, signature check
+    disabled. Overlapping lines produce harmless "Duplicate src declaration"
+    warnings — keep each repo in one file.
+  - apk (25.12+): the urls go to `repositories` as `<url>/packages.adb`;
+    `*.pem` keys from `imagebuilder/<version>/keys/`, `.../profiles/<name>/keys/`
+    and `.../devices/<name>/keys/` are copied to the imagebuilder's `keys/`.
+    apk refuses unsigned repositories, so by default (`IMG_APK_ALLOW_UNTRUSTED=1`)
+    `--allow-untrusted` is forced — the opkg trust level; `0` requires a key
+    for every extra repository (modemfeed publishes none). An unreachable
+    extra repository only produces warnings; apk fetches its index with
+    `wget -T 60`, so the script also limits wget to 2 tries (the default 20
+    would stall every apk call for 20 minutes on a dead host, longer than
+    the asu job timeout).
 - sdk: `sdkbuilder/feeds-extra.conf` is appended to `feeds.conf.default`
   inside the SDK container.
 - asu: `repository_allow_list` in `asu/asu.toml` whitelists external repo URL
   prefixes for client build requests.
+- asu index merge (`asu.meta.publish*`): for each extra repository
+  `index.json` is fetched first (apk repos and buildbot-style opkg repos ship
+  it), `Packages` is the opkg fallback — owut needs a to-version for every
+  installed package, so a third-party repo without either blocks `owut upgrade`.
 
 SDK archive is produced by the src build (`CONFIG_SDK=y`) and stored next to the
 imagebuilder archive in `artifacts/src/<version>/`. `pkg.sdk.%` builds the SDK
@@ -125,7 +202,7 @@ make targets, custom-device cycle, tag mapping — see [asu/README.md](asu/READM
 
 ## fantastic
 
-- src: https://github.com/fantastic-packages/packages/tree/24.10 
+- src: https://github.com/fantastic-packages/packages/tree/24.10
 - bin: https://github.com/fantastic-packages/releases/tree/archive/24.10
 
 ## routerich
@@ -139,7 +216,7 @@ make targets, custom-device cycle, tag mapping — see [asu/README.md](asu/READM
 ## modemfeed
 
 - src: https://github.com/koshev-msk/modemfeed.git
-- bin: 
+- bin:
 
 ## kiddin9
 
@@ -216,7 +293,7 @@ CONFIG_LINE_ADD := \
 	CONFIG_BUILDBOT=n \
 	CONFIG_IB_STANDALONE=y \
 	\
-	
+
 CONFIG_SED_LINE_DELETE := \
 	CONFIG_BUILDBOT=y \
 	CONFIG_IB_STANDALONE=n \

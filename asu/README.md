@@ -26,7 +26,9 @@ imagebuilder image or with one built from sources (`img.src.*`).
   package indexes from your own src build. ASU validates the profile against
   `{upstream_url}/…/profiles.json` **before** starting a build, so devices
   absent from downloads.openwrt.org only work with your own metadata
-  (`UPSTREAM_URL=http://metadata`).
+  (`UPSTREAM_URL` = `ASU_UPSTREAM_CUSTOM`, the nginx proxy on :8000 that
+  routes `/releases/…` to the metadata container; compose sets it from the
+  environment, so `upstream_url` in asu.toml does not apply there).
 
 Server config — `asu.toml` (`allow_defaults = true` — private server, custom
 uci-defaults allowed in build requests, so any LAN client can submit arbitrary
@@ -52,6 +54,7 @@ make asu.cycle.profile.<name>           #   img.src needs live metadata (local_c
 make asu.cycle.official.device.<name>   # same with the official imagebuilder base
 make asu.cycle.official.profile.<name>  #   (baked extra repos, no src build)
 make asu.logs
+make asu.registry.gc                    # reclaim layers of re-pushed tags in the registry volume
 make asu.down
 ```
 
@@ -72,8 +75,9 @@ exist on downloads.openwrt.org both problems are solved without a src build:
    for third-party packages);
 2. `make asu.custom.up` — same custom mode as below;
 3. `make img.official.device.<name>` — thin image: official imagebuilder base
-   (`imgbuilder-official.Dockerfile`) with `repositories-extra.conf` appended
-   to `repositories.conf`, tagged like the src images;
+   (`imgbuilder-official.Dockerfile`) with the `repositories-extra.conf` repos
+   added (opkg: `repositories.conf`; apk, 25.12+: `repositories` plus `keys/`,
+   see `scripts/ib-add-repos.sh`), tagged like the src images;
 4. `make asu.push.device.<name>` — push to the compose-local registry.
 
 Or all of it in order: `make asu.cycle.official.device.<name>`. Release
@@ -90,11 +94,12 @@ its custom devices) — use the src cycle below for those.
    (the profile lands in `bin/targets/.../profiles.json`, `src.archive`
    snapshots `openwrt/bin` into `artifacts/src/<ver>/` — publish reads the
    newest archive, so builds for other targets can overwrite the live tree);
-2. `make img.src.profile.<name>` — imagebuilder image built;
-3. `make asu.meta.publish` — profiles.json, `.targets.json`, `.versions.json`
+2. `make asu.meta.publish` — profiles.json, `.targets.json`, `.versions.json`
    and package feeds published to `asu/metadata/`;
-4. `make asu.custom.up` — server with `BASE_CONTAINER` pointing at the local
-   registry and `UPSTREAM_URL` at the nginx metadata;
+3. `make asu.custom.up` — server with `BASE_CONTAINER` pointing at the local
+   registry and `UPSTREAM_URL` at the proxy serving that metadata;
+4. `make img.src.profile.<name>` — imagebuilder image built (after the
+   metadata is up: its `local_core` repository is served from there);
 5. `make asu.push.profile.<name>` — image pushed to the registry;
 6. router talks to `http://<host>:8000`.
 
@@ -108,7 +113,7 @@ version-to-tag mapping (verified against ASU source):
 
 | Requested version  | Image tag       |
 |--------------------|-----------------|
-| `24.10.7`          | `v24.10.7`      |
+| `24.10.8`          | `v24.10.8`      |
 | `24.10-SNAPSHOT`   | `openwrt-24.10` |
 | `SNAPSHOT`         | `master`        |
 

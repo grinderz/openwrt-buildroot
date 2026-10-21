@@ -1,0 +1,25 @@
+imagebuilder: always copy the unlocked wireless-regdb package
+
+The unlocked wireless-regdb (003-wireless-regdb-unlock.patch) lands in
+bin/packages/<arch>/base, a feed the asu imagebuilder never sees: the
+image bundles no packages and its repository list points the base feed
+at the official mirror. Bundle the package into the imagebuilder archive
+(25.12 already bundles base-files/libc/kernel itself, the 24.10 base-files
+patch is not needed here) — its bumped version (2070.x) outranks the
+official one, so apk installs it in every build. apk package names use
+PACKAGE_VERSION_SEPARATOR ("-"), hence the variable instead of "_".
+
+--- a/target/imagebuilder/Makefile
++++ b/target/imagebuilder/Makefile
+@@ -80,6 +80,11 @@
+ 		-exec $(CP) -t $(PKG_BUILD_DIR)/packages/ {} +
+ endif
+ 
++	# Always copy the unlocked wireless-regdb package to archive
++	$(FIND) $(wildcard $(PACKAGE_SUBDIRS)) -type f \
++		\( -name 'wireless-regdb$(PACKAGE_VERSION_SEPARATOR)*.$(PACKAGE_SUFFIX)' \) \
++		-exec $(CP) -t $(PKG_BUILD_DIR)/packages {} +
++
+ ifneq ($(CONFIG_SIGNATURE_CHECK),)
+ ifneq ($(CONFIG_USE_APK),y)
+ 	echo ''                                                        >> $(PKG_BUILD_DIR)/repositories.conf

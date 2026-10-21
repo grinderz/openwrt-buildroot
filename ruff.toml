@@ -1,0 +1,7 @@
+# scripts/*.py: stdlib-only helpers run with the host python3, the floor is
+# the oldest one in play, the 3.12 of the ubuntu-latest CI runner
+target-version = "py312"
+line-length = 88
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RET", "EXE"]
