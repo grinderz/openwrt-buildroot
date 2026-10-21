@@ -1,0 +1,9 @@
+CONFIG_KERNEL_VERMAGIC := aa81475ddbdbcc69877f69037ae40cd8
+
+CONFIG_LINE_ADD := \
+	CONFIG_TARGET_DEVICE_ramips_mt7621_DEVICE_asus_rt-n56u-b1=y \
+	CONFIG_TARGET_DEVICE_ramips_mt7621_DEVICE_securifi_almond-3s=y \
+	\
+
+CONFIG_SED_LINE_DELETE := \
+	\

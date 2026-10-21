@@ -2,13 +2,13 @@
 # Loaded by the Makefile before anything else; command-line variables
 # (make SRC_TARGET=...) still override these values.
 
-OWRT_RELEASE := 24.10.7
+OWRT_RELEASE := 24.10.8
 SRC_TARGET := ramips
 SRC_SUBTARGET := mt7621
 
 # public URL of the asu proxy: must be reachable by the asu server, the
 # routers (owut resolves upstream_url itself) and nested podman builders.
-# Normally comes from ~/.config/openwrt-buildroot/config.mk (dotfiles)
+# Normally comes from ~/.config/openwrt-buildroot/config.mk (~/sync/dotfiles)
 #ASU_UPSTREAM_CUSTOM := http://192.0.2.1:8000
 
 # merge official/third-party feed indexes into published metadata during
@@ -19,7 +19,7 @@ ASU_MERGE_INDEXES := 1
 ARCHIVE_ZSTD_OPTS := -T0 -3
 
 # rsync destination for make deploy / deploy.diff (build host checkout).
-# Normally comes from ~/.config/openwrt-buildroot/config.mk (dotfiles)
+# Normally comes from ~/.config/openwrt-buildroot/config.mk (~/sync/dotfiles)
 #DEPLOY_DEST := user@buildhost:/home/user/src/openwrt-buildroot
 
 # docker image names: official builder/sdk (mirror them if quay is slow or

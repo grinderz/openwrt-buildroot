@@ -2,3 +2,5 @@
 
 !artifacts/src/*/openwrt-imagebuilder-*.Linux-x86_64.tar.zst
 !artifacts/img/*/tmp/ib-repositories-extra.conf
+!artifacts/img/*/tmp/ib-keys/**
+!scripts/ib-add-repos.sh

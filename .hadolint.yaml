@@ -1,0 +1,8 @@
+# hadolint (make lint.hadolint)
+ignored:
+  # apt packages are not version-pinned: the images track the distro
+  # release, a pin would rot on every mirror update
+  - DL3008
+  # USER buildbot: the name resolves inside the image (passwd entry), the
+  # uid is mapped by the compose/run user= setting
+  - DL3066

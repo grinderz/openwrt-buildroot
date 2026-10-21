@@ -1,8 +1,11 @@
 # ASU server configuration, see https://github.com/openwrt/asu
 # base_container is set via the BASE_CONTAINER env by make targets:
-#   asu.up      -> ghcr.io/openwrt/imagebuilder (official)
-#   asu.src.up  -> registry:5000/varch/openwrt-imagebuilder (src build)
+#   asu.up         -> ghcr.io/openwrt/imagebuilder (official)
+#   asu.src.up     -> registry:5000/varch/openwrt-imagebuilder (src build)
+#   asu.custom.up  -> same registry, upstream = ASU_UPSTREAM_CUSTOM (custom devices)
 
+# under asu/docker-compose.yaml the UPSTREAM_URL environment (ASU_UPSTREAM_URL
+# = ASU_UPSTREAM_CUSTOM for asu.custom.up) overrides this value
 #upstream_url = "https://downloads.openwrt.org"
 upstream_url = "http://metadata"
 log_level = "INFO"
@@ -15,15 +18,26 @@ cache_url = "http://asu-cache"
 allow_defaults = true
 
 # allowed external repository URL prefixes for build requests
-# (client-supplied repos are rejected unless they match one of these)
+# (client-supplied repos are rejected unless they match one of these;
+# scheme + host must be equal, the path is a prefix). Repos baked into the
+# imagebuilder images (repositories-extra.conf) do not pass through here.
+# 25.12 (apk) entries end in /packages.adb and carry a repository_keys
+# entry in the request, the prefixes below cover both layouts:
+#   24.10: <base>/24.10.x/targets/..., <base>/packages-24.10/<arch>/...
+#   25.12: <base>/25.12.x/targets/..., <base>/packages-25.12/<arch>/...
 repository_allow_list = [
-    "https://raw.githubusercontent.com/4IceG/Modem-extras/main/myrepo/",
-    "https://openwrt.132lan.ru/packages/",
+    # own feed (openwrt-feed-builder), opkg 24.10 and apk 25.12
     "http://192.0.2.2:80/openwrt/releases/",
+    # src-published core packages (local_core) on the asu metadata server
+    "http://192.0.2.1:8000/releases/",
+    # modemfeed: packages/24.10 (opkg) and packages/25.12 (apk)
+    "https://openwrt.132lan.ru/packages/",
+    # 4IceG Modem-extras: opkg only, no 25.12 repo yet
+    "https://raw.githubusercontent.com/4IceG/Modem-extras/main/myrepo/",
 #    "https://github.com/fantastic-packages/releases/raw/",
 #    "https://raw.githubusercontent.com/routerich/",
 #    "https://raw.githubusercontent.com/4IceG/",
-#    "https://dl.openwrt.ai/",
+#    "https://dl.openwrt.ai/",        # kiddin9: packages-25.12 is still opkg
 ]
 
 build_ttl = "1d"

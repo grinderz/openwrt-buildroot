@@ -1,0 +1,108 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Renovate on GitHub keeps the tooling pins: workflow actions, pre-commit hook revs, the tool versions of the Makefile, the ubuntu base of srcbuilder and the asu stack images in asu/.env.",
+    "OpenWrt releases (versions/*.mk, imagebuilder/, srcbuilder/) move by hand: a bump renames directories and reports patches."
+  ],
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Europe/Istanbul",
+  "schedule": [
+    "before 9am on saturday"
+  ],
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 5,
+  "semanticCommitType": "chore",
+  "baseBranchPatterns": [
+    "master"
+  ],
+  "enabledManagers": [
+    "github-actions",
+    "pre-commit",
+    "dockerfile",
+    "custom.regex"
+  ],
+  "pre-commit": {
+    "enabled": true
+  },
+  "branchPrefix": "renovate/",
+  "labels": [
+    "dependencies"
+  ],
+  "packageRules": [
+    {
+      "description": "locally built images, latest is their only tag",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "varch/**"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "asu stack minor/patch/digest bumps in one PR, majors one per image",
+      "matchFileNames": [
+        "asu/.env"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "asu stack images"
+    },
+    {
+      "description": "redis-stack-server tags carry a -v<build> suffix the docker versioning does not order",
+      "matchPackageNames": [
+        "docker.io/redis/redis-stack-server",
+        "redis/redis-stack-server"
+      ],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-v(?<build>\\d+)$"
+    },
+    {
+      "description": "pre-commit hooks in their own PR",
+      "matchManagers": [
+        "pre-commit"
+      ],
+      "groupName": "pre-commit hooks"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "pre-commit, run through uvx at the version of the Makefile",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "PRE_COMMIT_VERSION \\?= (?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "pre-commit",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "hadolint image of lint.hadolint",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "HADOLINT_IMAGE \\?= (?<depName>[^:\\s]+):(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "asu stack images: compose reads them through ${VAR}, invisible to the docker-compose manager; the asu image is pinned by digest on latest",
+      "managerFilePatterns": [
+        "/^asu/\\.env$/"
+      ],
+      "matchStrings": [
+        "^[A-Z_]+_IMAGE=(?<depName>[^:@\\s]+)(?::(?<currentValue>[^@\\s]+))?(?:@(?<currentDigest>sha256:[a-f0-9]+))?$"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
+}
