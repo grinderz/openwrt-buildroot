@@ -3,3 +3,4 @@
 003-imagebuilder-copy-wireless-regdb.patch
 004-wireless-regdb-unlock.patch
 005-securifi-almond-3s.patch
+006-tools-deps-for-dependency-only-tools.patch

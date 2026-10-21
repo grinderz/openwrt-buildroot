@@ -3,3 +3,4 @@
 003-wireless-regdb-unlock.patch
 004-netgear-fit-rootfs-fallback.patch
 005-securifi-almond-3s.patch
+006-tools-deps-for-dependency-only-tools.patch
