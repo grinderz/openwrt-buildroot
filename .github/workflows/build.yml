@@ -73,7 +73,7 @@ jobs:
       # patch releases, not for branch names (master-almond3s -> master)
       - id: vars
         run: |
-          make -s info | awk -F': ' '$1 == "CONFIG_DIR_VERSION" {print "dir_version=" $2}' >> "$GITHUB_OUTPUT"
+          make -s info | awk -F': ' '$1 == "OWRT_DIR" {print "owrt_dir=" $2} $1 == "CONFIG_DIR_VERSION" {print "dir_version=" $2}' >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
       - name: srcbuilder image
@@ -87,8 +87,20 @@ jobs:
 
       # no caches: the runs are manual and rare, a GitHub cache expires after
       # 7 days unused, and dl/ (1.3 GB per version) downloads in minutes
+      # CONFIG_BUILD_LOG=y: OpenWrt hides a failed package's output behind
+      # "re-run with V=s", the per-package log files under <owrt_dir>/logs
+      # keep it and are uploaded when the build fails
       - name: src build
-        run: docker compose run --rm -T -w /builder/src -e OWRT_RELEASE -e SRC_TARGET -e SRC_SUBTARGET srcbuilder make src.all
+        run: docker compose run --rm -T -w /builder/src -e OWRT_RELEASE -e SRC_TARGET -e SRC_SUBTARGET -e SRC_CONFIG_EXTRA=CONFIG_BUILD_LOG=y srcbuilder make src.all
+
+      - name: upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs__${{ matrix.version }}__${{ matrix.target }}-${{ matrix.subtarget }}
+          path: ${{ steps.vars.outputs.owrt_dir }}/logs
+          retention-days: ${{ inputs.retention_days }}
+          if-no-files-found: ignore
 
       # the src products are the expensive part: uploaded before the image
       # builds, so a failing profile does not cost the hours of the build

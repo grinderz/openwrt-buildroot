@@ -120,7 +120,7 @@ ARTIFACTS_DIR := artifacts
 
 # flaky-network tolerant curl: --retry alone skips TLS/connection errors,
 # --retry-all-errors covers them (costs 3 extra tries on hard 404s)
-CURL := curl -sSf --retry 3 --retry-all-errors --retry-delay 2 --max-time 120
+CURL := curl -sSf --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120
 
 SRC_DIR := srcbuilder/$(CONFIG_DIR_VERSION)
 SRC_TARGETS_DIR := $(SRC_DIR)/targets
@@ -130,6 +130,10 @@ SRC_GENERIC_CONFIG := $(firstword $(wildcard $(SRC_TARGETS_DIR)/generic/config.m
 SRC_FEEDS_EXTRA := $(firstword $(wildcard $(SRC_DIR)/feeds-extra.conf) $(wildcard srcbuilder/feeds-extra.conf))
 SRC_CONFIG_URL := $(OWRT_TARGETS_URL)/$(SRC_TARGET)/$(SRC_SUBTARGET)/config.buildinfo
 SRC_QUILT_PATCHES := ../$(SRC_DIR)/patches
+# extra .config lines appended by src.build.config, e.g. CONFIG_BUILD_LOG=y
+# in CI (OpenWrt hides a failed package's output behind "re-run with V=s",
+# the log files keep it)
+SRC_CONFIG_EXTRA ?=
 
 SRC_ARTIFACTS_DIR := $(ARTIFACTS_DIR)/src/$(CONFIG_DIR_VERSION)
 SRC_ARTIFACTS_ARCHIVE_FILE := openwrt-$(OWRT_VERSION)-$(SRC_TARGET)-$(SRC_SUBTARGET)-$$(date +%F).tar.zst
@@ -1322,6 +1326,12 @@ src.build.config: ## Src build config
 		echo "$${line}" >> config.buildinfo
 	done
 
+	@echo " - extra lines (SRC_CONFIG_EXTRA)"
+	@for line in $(SRC_CONFIG_EXTRA); do
+		echo "   - processing $${line}"
+		echo "$${line}" >> config.buildinfo
+	done
+
 	echo "CONFIG_KERNEL_VERMAGIC=\"$(CONFIG_KERNEL_VERMAGIC)\"" >> config.buildinfo
 
 	cp config.buildinfo $(OWRT_DIR)/.config
@@ -1528,14 +1538,23 @@ ci.runs: ## List the recent Build workflow runs (ids for ci.download)
 # that release (not the release name: master-almond3s -> master), where
 # the img.src.* / asu.* targets look for them
 .PHONY: ci.download
-ci.download: ## Download the artifacts of RUN=<run id> into artifacts/src and artifacts/img
+ci.download: ## Download the artifacts of RUN=<run id> into artifacts/src, artifacts/img and artifacts/logs
 	@[ -n "$(RUN)" ] || { echo "usage: make ci.download RUN=<run id> (see ci.runs)" >&2; exit 1; }
 	gh run download $(RUN) --dir "$(CI_DL_DIR)/$(RUN)"
-	for SH_DIR in "$(CI_DL_DIR)/$(RUN)"/src__*/ "$(CI_DL_DIR)/$(RUN)"/img__*/; do
+	for SH_DIR in "$(CI_DL_DIR)/$(RUN)"/src__*/ "$(CI_DL_DIR)/$(RUN)"/img__*/ "$(CI_DL_DIR)/$(RUN)"/logs__*/; do
 		[ -d "$${SH_DIR}" ] || continue
 		SH_NAME=$$(basename "$${SH_DIR}")
 		SH_KIND=$${SH_NAME%%__*}
 		SH_RELEASE=$$(awk -F'__' '{print $$2}' <<< "$${SH_NAME}")
+		if [ "$${SH_KIND}" = logs ]; then
+			# build logs of a failed src job: artifacts/logs/ci-<run>-<release>-<target>-<subtarget>/
+			SH_DEST=$(ARTIFACTS_DIR)/logs/ci-$(RUN)-$${SH_RELEASE}-$${SH_NAME##*__}
+			rm -rf "$${SH_DEST}"
+			mkdir -p "$(ARTIFACTS_DIR)/logs"
+			cp -r "$${SH_DIR}" "$${SH_DEST}"
+			echo " - $${SH_NAME} -> $${SH_DEST}/ ($$(find "$${SH_DIR}" -type f | wc -l) files)"
+			continue
+		fi
 		SH_VERSION=$$($(SUBMAKE) -s info OWRT_RELEASE="$${SH_RELEASE}" | awk -F': ' '$$1 == "CONFIG_DIR_VERSION" {print $$2}')
 		SH_DEST=$(ARTIFACTS_DIR)/$${SH_KIND}/$${SH_VERSION}
 		mkdir -p "$${SH_DEST}"

@@ -46,7 +46,7 @@ with opkg/apk warnings). The matrix comes from
 make ci.run                                   # defaults: versions "24.10.8 25.12.6", all targets, images on
 make ci.run ARGS="-f versions=25.12.6 -f targets=ramips/mt7621 -f images=false"
 make ci.runs                                  # run ids
-make ci.download RUN=<id>                     # artifacts -> artifacts/src/<ver>/ and artifacts/img/<ver>/
+make ci.download RUN=<id>                     # artifacts -> artifacts/src/<ver>/, artifacts/img/<ver>/, failed builds' logs -> artifacts/logs/ci-<id>-*/
 make img.src.device.rtr3-almond-s3 OWRT_RELEASE=24.10.8      # local builds from the CI products
 make asu.cycle.device.rtr1-gl-mt6000 OWRT_RELEASE=24.10.8
 ```
