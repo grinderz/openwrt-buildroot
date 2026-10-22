@@ -1185,6 +1185,28 @@ docker.clean.all: ## Remove every container, volume, image and build cache of th
 	docker builder prune -af
 	docker system df
 
+# dated src/img products beyond the KEEP newest per name (scripts/artifacts-prune.sh),
+# the logs (ci.download copies of failed builds, hand-made run logs) and
+# leftovers of interrupted ci.download runs
+KEEP ?= 1
+
+.PHONY: artifacts.prune
+artifacts.prune: ## Remove stale dated src/img artifacts (KEEP=1 newest per name), artifacts/logs and artifacts/ci (asks first; YES=1 skips the prompt)
+	@SH_STALE=$$(scripts/artifacts-prune.sh "$(ARTIFACTS_DIR)" "$(KEEP)")
+	SH_DIRS=$$(ls -d "$(ARTIFACTS_DIR)"/logs "$(CI_DL_DIR)" 2>/dev/null || :)
+	if [ -z "$${SH_STALE}$${SH_DIRS}" ]; then echo " - nothing to prune"; exit 0; fi
+	echo "Going to remove:"
+	echo "  - dated artifacts older than the $(KEEP) newest of their name:$${SH_STALE:+$$'\n'}$$(echo "$${SH_STALE}" | sed '/^$$/d' | xargs -r du -h | sed 's/^/      /')"
+	echo "  - directories:$${SH_DIRS:+$$'\n'}$$(echo "$${SH_DIRS}" | sed '/^$$/d' | xargs -r du -sh | sed 's/^/      /')"
+	echo "Kept: the newest archive of every name, imagebuilder/sdk/profile zips (rewritten by each build)"
+	if [ "$(YES)" != 1 ]; then
+		read -r -p "Continue? [y/N] " SH_ANSWER || SH_ANSWER=
+		case "$${SH_ANSWER}" in y|Y) ;; *) echo " - aborted"; exit 1 ;; esac
+	fi
+	echo "$${SH_STALE}" | sed '/^$$/d' | xargs -r rm -f
+	echo "$${SH_DIRS}" | sed '/^$$/d' | xargs -r rm -rf
+	du -sh "$(ARTIFACTS_DIR)"/*/ 2>/dev/null || :
+
 
 ##@ Source Builder Targets
 

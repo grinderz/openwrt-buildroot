@@ -47,6 +47,7 @@ make ci.run                                   # defaults: versions "24.10.8 25.1
 make ci.run ARGS="-f versions=25.12.6 -f targets=ramips/mt7621 -f images=false"
 make ci.runs                                  # run ids
 make ci.download RUN=<id>                     # artifacts -> artifacts/src/<ver>/, artifacts/img/<ver>/, failed builds' logs -> artifacts/logs/ci-<id>-*/
+make artifacts.prune                          # drop the archives older than the newest of each name, logs and download leftovers (asks first)
 make img.src.device.rtr3-almond-s3 OWRT_RELEASE=24.10.8      # local builds from the CI products
 make asu.cycle.device.rtr1-gl-mt6000 OWRT_RELEASE=24.10.8
 ```
@@ -99,6 +100,14 @@ imagebuilder/sdk/srcbuilder images, then dangling images, anonymous volumes
 and the default builder cache) and asks before removing it; `YES=1` skips the
 prompt. Source trees and `artifacts/` stay: `src.clean.owrt`,
 `src.clean.artifacts`, `img.clean.artifacts`, `pkg.clean.artifacts`.
+
+`make artifacts.prune` lists and, after the same prompt, removes the dated
+src/img archives (`...-<YYYY-MM-DD>.tar.zst`) older than the `KEEP=1` newest
+of their name (profile, device and official-cycle images are separate
+names), `artifacts/logs/` (build logs of failed CI jobs from `ci.download`)
+and `artifacts/ci/` (leftovers of an interrupted download). Imagebuilder,
+sdk and profile zips carry no date and are rewritten by every build, so they
+stay. The list comes from `scripts/artifacts-prune.sh <artifacts dir> [keep]`.
 
 ## Targets used in this project
 
