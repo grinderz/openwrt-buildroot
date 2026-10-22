@@ -107,8 +107,8 @@ jobs:
 
   # end-to-end image build with the official imagebuilder image: opkg path
   # (24.10, version-level repositories-extra.conf through ib-add-repos) and
-  # the 25.12 apk imagebuilder with custom packages (no extra repos there,
-  # the apk path of ib-add-repos is covered by tests/bats). Profiles whose
+  # the 25.12 apk imagebuilder with custom packages and the version-level apk
+  # repository (4IceG Modem-extras-apk, with its key). Profiles whose
   # repositories-extra.conf points at private hosts are not built here
   imagebuilder:
     runs-on: ubuntu-latest
