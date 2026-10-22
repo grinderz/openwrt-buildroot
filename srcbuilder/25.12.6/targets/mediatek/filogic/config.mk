@@ -2,6 +2,7 @@ CONFIG_KERNEL_VERMAGIC := f0a7348f9cb959e1bf4d0447669b031e
 
 CONFIG_LINE_ADD := \
 	CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cudy_ap3000-v1=y \
+	CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_glinet_gl-mt6000=y \
 	\
 
 CONFIG_SED_LINE_DELETE := \

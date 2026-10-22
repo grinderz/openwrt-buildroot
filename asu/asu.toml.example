@@ -32,8 +32,9 @@ repository_allow_list = [
     "http://192.0.2.1:8000/releases/",
     # modemfeed: packages/24.10 (opkg) and packages/25.12 (apk)
     "https://openwrt.132lan.ru/packages/",
-    # 4IceG Modem-extras: opkg only, no 25.12 repo yet
+    # 4IceG Modem-extras: opkg (24.10) and the apk repo (25.12)
     "https://raw.githubusercontent.com/4IceG/Modem-extras/main/myrepo/",
+    "https://raw.githubusercontent.com/4IceG/Modem-extras-apk/main/myapk/",
 #    "https://github.com/fantastic-packages/releases/raw/",
 #    "https://raw.githubusercontent.com/routerich/",
 #    "https://raw.githubusercontent.com/4IceG/",

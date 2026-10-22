@@ -106,12 +106,12 @@ prompt. Source trees and `artifacts/` stay: `src.clean.owrt`,
 |----------------------------|--------------------|---------------------------------|
 | `ramips/mt7621` (default)  | 24.10.8, 25.12.6, master | asus_rt-n56u-b1; securifi_almond-3s (24.10.8/25.12.6 via patch, master); device: rtr3-almond-s3 |
 | `mediatek/filogic`         | 24.10, 24.10.8, 25.12, 25.12.6, master | cudy_ap3000-v1, cudy_m3000-v1, cudy_m3000-v2-yt8821 (master), cudy_tr3000-256mb-v1, cudy_tr3000-v1-ubootmod, glinet_gl-mt6000, xiaomi_mi-router-ax3000t-ubootmod; device: rtr1-gl-mt6000 |
-| `bcm27xx/bcm2710`          | 24.10.8            | rpi-3; device: nut-rpi-3 |
+| `bcm27xx/bcm2710`          | 24.10.8, 25.12.6   | rpi-3; device: nut-rpi-3 |
 | `bcm27xx/bcm2711`          | 24.10.8            | rpi-4 |
 | `bcm47xx/mips74k`          | 24.10.8            | netgear_wnr3500l-v1-na |
 | `rockchip/armv8`           | 24.10.8            | friendlyarm_nanopi-r3s |
 | `sunxi/cortexa53`          | 24.10.8            | xunlong_orangepi-zero3 |
-| `x86/64`                   | 24.10.8            | generic; device: demo-lec-7233 |
+| `x86/64`                   | 24.10.8, 25.12.6   | generic; device: demo-lec-7233 |
 
 # Custom feeds / repositories
 
@@ -151,6 +151,30 @@ imagebuilder archive in `artifacts/src/<version>/`. `pkg.sdk.%` builds the SDK
 docker image from it, then compiles the package from feeds. Local package
 sources placed in `sdkbuilder/packages/<name>/` are mounted into the SDK and
 take precedence over feeds.
+
+## 24.10 -> 25.12 migration: packages missing from the custom repos
+
+The 25.12 imagebuilder is apk-only, so opkg-only third-party repos drop out
+and the device package lists of `imagebuilder/25.12.6/devices/` differ from
+their 24.10.8 originals (checked against the `index.json` of every feed on
+2026-10-22). 4IceG publishes a separate apk repo (`Modem-extras-apk`, used in
+`imagebuilder/25.12.6/repositories-extra.conf` with its key) with the same
+luci apps (`luci-app-3ginfo-lite`, `luci-app-modemband`, ...):
+
+| Package | 24.10 source | 25.12 status |
+|---------|--------------|--------------|
+| `ethstatus` | modemfeed 24.10 | not built for 25.12 anywhere (official, modemfeed, own repo) |
+| `libstdcpp6` | opkg name with the ABI suffix | apk package is `libstdcpp` |
+
+Still available for 25.12, but from a different place: `luci-proto-openvpn`,
+`telegrambot`, `luci-app-atinout`, `luci-app-smstools3` come from
+modemfeed 25.12 (`https://openwrt.132lan.ru/packages/25.12/packages/<arch>/modemfeed`,
+apk, unsigned); `kmod-amneziawg` from the own kmods repo
+(`.../25.12.6/targets/<target>/<subtarget>/kmods/<kver>`); `luci-proto-amneziawg`,
+`internet-detector*`, `luci-app-ssclash`, `ssclash-mihomo`, `beszel-agent`,
+`luci-app-log-viewer` from the own `packages-25.12/<arch>/packages` feed. Both
+own feeds exist only for `aarch64_cortex-a53` and `mipsel_24kc`; `x86/64` and
+`bcm27xx/bcm2710` have no own 25.12 repos (their devices use no custom packages).
 
 # Package builds (pkg.* / SDK containers)
 
@@ -211,7 +235,8 @@ make targets, custom-device cycle, tag mapping — see [asu/README.md](asu/READM
 
 ## modem extras
 
-- bin: https://github.com/4IceG/Modem-extras/tree/main/myrepo
+- bin (opkg, 24.10): https://github.com/4IceG/Modem-extras/tree/main/myrepo
+- bin (apk, 25.12): https://github.com/4IceG/Modem-extras-apk/tree/main/myapk
 
 ## modemfeed
 
