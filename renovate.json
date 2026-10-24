@@ -84,6 +84,18 @@
     },
     {
       "customType": "regex",
+      "description": "ruff, run through uvx at the version of the Makefile",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "RUFF_VERSION \\?= (?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "ruff",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
       "description": "hadolint image of lint.hadolint",
       "managerFilePatterns": [
         "/^Makefile$/"
@@ -95,12 +107,12 @@
     },
     {
       "customType": "regex",
-      "description": "asu stack images: compose reads them through ${VAR}, invisible to the docker-compose manager; the asu image is pinned by digest on latest",
+      "description": "asu stack images: compose reads them through ${VAR}, invisible to the docker-compose manager; the asu image is pinned by digest on latest; no ^/$ anchors, renovate compiles matchStrings without the m flag",
       "managerFilePatterns": [
         "/^asu/\\.env$/"
       ],
       "matchStrings": [
-        "^[A-Z_]+_IMAGE=(?<depName>[^:@\\s]+)(?::(?<currentValue>[^@\\s]+))?(?:@(?<currentDigest>sha256:[a-f0-9]+))?$"
+        "[A-Z_]+_IMAGE=(?<depName>[^:@\\s]+)(?::(?<currentValue>[^@\\s]+))?(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
       ],
       "datasourceTemplate": "docker"
     },

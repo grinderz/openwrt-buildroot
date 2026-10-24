@@ -1490,7 +1490,8 @@ test.bats: ## Run the bats shell tests from BATS_DIR (ARGS=... for bats flags)
 
 PRE_COMMIT_VERSION ?= 4.7.0
 PRE_COMMIT ?= uvx pre-commit@$(PRE_COMMIT_VERSION)
-RUFF ?= uvx ruff
+RUFF_VERSION ?= 0.17.2
+RUFF ?= uvx ruff@$(RUFF_VERSION)
 # hadolint is not packaged everywhere, docker is a requirement anyway
 HADOLINT_IMAGE ?= hadolint/hadolint:v2.15.1
 # build trees, artifacts and served metadata are not ours to lint
