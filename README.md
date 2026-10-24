@@ -114,10 +114,10 @@ stay. The list comes from `scripts/artifacts-prune.sh <artifacts dir> [keep]`.
 | `SRC_TARGET/SRC_SUBTARGET` | srcbuilder configs | imagebuilder profiles / devices |
 |----------------------------|--------------------|---------------------------------|
 | `ramips/mt7621` (default)  | 24.10.8, 25.12.6, master | asus_rt-n56u-b1; securifi_almond-3s (24.10.8/25.12.6 via patch, master); device: rtr3-almond-s3 |
-| `mediatek/filogic`         | 24.10, 24.10.8, 25.12, 25.12.6, master | cudy_ap3000-v1, cudy_m3000-v1, cudy_m3000-v2-yt8821 (master), cudy_tr3000-256mb-v1, cudy_tr3000-v1-ubootmod, glinet_gl-mt6000, xiaomi_mi-router-ax3000t-ubootmod; device: rtr1-gl-mt6000 |
+| `mediatek/filogic`         | 24.10, 24.10.8, 25.12, 25.12.6, master | cudy_ap3000-v1, cudy_m3000-v1, cudy_m3000-v2-yt8821 (master), cudy_tr3000-256mb-v1, cudy_tr3000-v1-ubootmod, glinet_gl-mt6000, routerich_ax3000-v1 (25.12.6), xiaomi_mi-router-ax3000t-ubootmod; device: rtr1-gl-mt6000 |
 | `bcm27xx/bcm2710`          | 24.10.8, 25.12.6   | rpi-3; device: nut-rpi-3 |
 | `bcm27xx/bcm2711`          | 24.10.8            | rpi-4 |
-| `bcm47xx/mips74k`          | 24.10.8            | netgear_wnr3500l-v1-na |
+| `bcm47xx/mips74k`          | 24.10.8            | netgear_wnr3500l-v1-na (24.10.8), netgear_wnr3500l-v1na (25.12.6, renamed upstream) |
 | `rockchip/armv8`           | 24.10.8            | friendlyarm_nanopi-r3s |
 | `sunxi/cortexa53`          | 24.10.8            | xunlong_orangepi-zero3 |
 | `x86/64`                   | 24.10.8, 25.12.6   | generic; device: demo-lec-7233 |
@@ -132,7 +132,11 @@ stay. The list comes from `scripts/artifacts-prune.sh <artifacts dir> [keep]`.
   that order (all that exist, not first-match) and added to the imagebuilder
   by `scripts/ib-add-repos.sh` (at run time for `img.*`, baked into the image
   for `img.src.*` / `img.official.*`). Lines are always opkg syntax
-  (`src/gz <name> <url>`, the name keys the asu index merge):
+  (`src/gz <name> <url>`, the name keys the asu index merge).
+  `@ASU_UPSTREAM_CUSTOM@` in a url is replaced with `ASU_UPSTREAM_CUSTOM`
+  (the asu metadata server of the build host, e.g. `local_core` with the
+  src-built core packages), so the files carry no host address; the index
+  merge skips such repositories, they are served by the published tree itself:
   - opkg (up to 24.10): appended to `repositories.conf`, signature check
     disabled. Overlapping lines produce harmless "Duplicate src declaration"
     warnings — keep each repo in one file.

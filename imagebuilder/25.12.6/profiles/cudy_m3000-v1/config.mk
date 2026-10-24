@@ -1,0 +1,5 @@
+CONFIG_TARGET := mediatek
+CONFIG_SUBTARGET := filogic
+CONFIG_PROFILE := cudy_m3000-v1
+CONFIG_CUSTOM_PKGS := \
+	\

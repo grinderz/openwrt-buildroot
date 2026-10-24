@@ -197,6 +197,10 @@ SDK_DOCKER_PULL ?=
 # anyway, 0 requires a key for every extra repository
 IMG_APK_ALLOW_UNTRUSTED ?= 1
 IMG_REPOS_SCRIPT := scripts/ib-add-repos.sh
+# @ASU_UPSTREAM_CUSTOM@ in repositories-extra.conf stands for the asu
+# metadata server of this host (local_core: src-built core packages), so the
+# same file works on every build host; rendered on the way to the imagebuilder
+IMG_REPOS_RENDER = sed 's|@ASU_UPSTREAM_CUSTOM@|$(ASU_UPSTREAM_CUSTOM)|g'
 
 # guard: src targets (except src.docker.*) need OWRT_DIR from a version file
 SRC_GUARDED_GOALS := $(filter-out src.docker.%,$(filter src.% _src.% asu.meta.%,$(MAKECMDGOALS)))
@@ -368,7 +372,7 @@ define Img/Repos
 
 	if [ -n "$${SH_REPOS_FILES}" ]; then
 		echo " - custom repositories:$${SH_REPOS_FILES}"
-		cat $${SH_REPOS_FILES} >| $(IMG_TMP_DIR)/repositories-extra.conf
+		cat $${SH_REPOS_FILES} | $(IMG_REPOS_RENDER) >| $(IMG_TMP_DIR)/repositories-extra.conf
 	fi
 endef
 
@@ -400,7 +404,7 @@ define Img/ReposExtra/File
 			$(IMG_DIR)/profiles/$(CONFIG_PROFILE)/repositories-extra.conf \
 			$(if $(CONFIG_DEVICE),$(IMG_DIR)/devices/$(CONFIG_DEVICE)/repositories-extra.conf); do
 		if [ -f "$${SH_REPOS_SRC}" ]; then
-			cat "$${SH_REPOS_SRC}" >> $(IMG_TMP_DIR)/ib-repositories-extra.conf
+			$(IMG_REPOS_RENDER) "$${SH_REPOS_SRC}" >> $(IMG_TMP_DIR)/ib-repositories-extra.conf
 		fi
 	done
 endef

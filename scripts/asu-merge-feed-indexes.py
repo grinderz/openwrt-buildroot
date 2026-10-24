@@ -54,6 +54,10 @@ _fetch_cache: dict[str, bytes | None] = {}
 fetch_failures: list[str] = []
 extra_failures: list[str] = []
 
+# repositories-extra.conf spelling of this host's asu metadata server, the
+# Makefile renders it to ASU_UPSTREAM_CUSTOM for the imagebuilder
+SELF_URL_PLACEHOLDER = "@ASU_UPSTREAM_CUSTOM@"
+
 
 def fetch(
     url: str, quiet_404: bool = False, failures: list[str] | None = None
@@ -251,9 +255,12 @@ def mirror_extra_repos(
             _, feed, url = fields
 
             # repositories served by this very metadata tree (local_core on
-            # the asu metadata server): their packages are published here
-            # directly, and the server is not up yet while publishing
-            if any(url.startswith(s) for s in self_urls):
+            # the asu metadata server, written as @ASU_UPSTREAM_CUSTOM@): their
+            # packages are published here directly, and the server is not up
+            # yet while publishing
+            if url.startswith(SELF_URL_PLACEHOLDER) or any(
+                url.startswith(s) for s in self_urls
+            ):
                 print(f" - extra {feed}: served by this metadata tree, skipped")
                 continue
 
