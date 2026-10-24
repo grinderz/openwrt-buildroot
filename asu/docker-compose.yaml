@@ -86,6 +86,13 @@ services:
           ${NGINX_IMAGE} \
           || echo "warning: asu-cache failed to start"
         exec podman system service --time=0 unix:///sock/podman.sock
+    # /run is podman's boot-scoped state (libpod, overlay mounts). In the
+    # container's writable layer it survives a host reboot and podman then
+    # refuses to start ("current system boot ID differs from cached boot ID"),
+    # so the service restart-loops; a tmpfs is fresh on every start like /run
+    # on a real host
+    tmpfs:
+      - /run
     volumes:
       - podman-sock:/sock
       - podman-storage:/var/lib/containers
