@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "Renovate on GitHub keeps the tooling pins: workflow actions, pre-commit hook revs, the tool versions of the Makefile, the ubuntu base of srcbuilder and the asu stack images in asu/.env.",
+    "Renovate on GitHub keeps the tooling pins: workflow actions, pre-commit hook revs, the tool versions of the Makefile, the shellcheck release of the CI lint job, the ubuntu base of srcbuilder and the asu stack images in asu/.env.",
     "OpenWrt releases (versions/*.mk, imagebuilder/, srcbuilder/) move by hand: a bump renames directories and reports patches."
   ],
   "extends": [
@@ -103,6 +103,19 @@
         "^[A-Z_]+_IMAGE=(?<depName>[^:@\\s]+)(?::(?<currentValue>[^@\\s]+))?(?:@(?<currentDigest>sha256:[a-f0-9]+))?$"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "shellcheck release installed by the CI lint job",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "SHELLCHECK_VERSION: (?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "koalaman/shellcheck",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
     }
   ]
 }
