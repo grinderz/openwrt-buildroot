@@ -186,8 +186,10 @@ apk, unsigned); `kmod-amneziawg` from the own kmods repo
 (`.../25.12.6/targets/<target>/<subtarget>/kmods/<kver>`); `luci-proto-amneziawg`,
 `internet-detector*`, `luci-app-ssclash`, `ssclash-mihomo`, `beszel-agent`,
 `luci-app-log-viewer` from the own `packages-25.12/<arch>/packages` feed. Both
-own feeds exist only for `aarch64_cortex-a53` and `mipsel_24kc`; `x86/64` and
-`bcm27xx/bcm2710` have no own 25.12 repos (their devices use no custom packages).
+own feeds exist only for `aarch64_cortex-a53` and `mipsel_24kc`; `bcm27xx/bcm2710`
+is `aarch64_cortex-a53` and also has own targets/kmods repos (wired in
+`profiles/rpi-3`, `beszel-agent` comes from there), `x86/64` has no own 25.12
+repos (its device uses no custom packages).
 
 # Package builds (pkg.* / SDK containers)
 

@@ -55,6 +55,8 @@ make asu.cycle.official.device.<name>   # same with the official imagebuilder ba
 make asu.cycle.official.profile.<name>  #   (baked extra repos, no src build)
 make asu.logs
 make asu.registry.gc                    # reclaim layers of re-pushed tags in the registry volume
+make asu.build.reset                    # forget failed builds (cached 1h), retry builds again;
+make asu.build.reset ASU_BUILD_HASH=<h> #   or one build by request hash, also a successful one
 make asu.down
 ```
 

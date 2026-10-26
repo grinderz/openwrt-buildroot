@@ -46,4 +46,7 @@ build_ttl_unversioned = "24h"
 build_defaults_ttl = "30m"
 build_failure_ttl = "1h"
 max_pending_jobs = 200
-job_timeout = "10m"
+# build job limit (rq). 10m is enough for a native amd64 host; the amd64
+# imagebuilder under emulation (colima/qemu on an arm64 mac) needs more, an
+# rpi-3 image (1 GB sdcard) ran out at 10m
+job_timeout = "30m"

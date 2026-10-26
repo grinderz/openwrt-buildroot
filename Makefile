@@ -997,6 +997,34 @@ asu.registry.gc: ## Delete untagged images/blobs from the ASU registry volume
 	@$(ASU_COMPOSE) exec -T registry registry garbage-collect --delete-untagged /etc/docker/registry/config.yml
 	$(ASU_COMPOSE) restart registry
 
+# asu answers a repeated request (same request hash) from redis: a failure
+# for build_failure_ttl (asu.toml, 1h), a success for build_ttl. After a
+# fixed image or metadata the retry would get the old result, so drop it:
+# every failed build, or with ASU_BUILD_HASH=<request_hash> that one build
+# whatever its outcome (the hash is in the owut output and the worker log)
+ASU_BUILD_HASH ?=
+ASU_RQ_QUEUE := default
+
+.PHONY: asu.build.reset
+asu.build.reset: ## Forget failed asu builds (or ASU_BUILD_HASH=<hash>) so a retry builds again
+	@if [ -n "$(ASU_BUILD_HASH)" ]; then
+		$(ASU_COMPOSE) exec -T redis redis-cli --no-raw EVAL " \
+			local n = redis.call('DEL', 'rq:job:' .. ARGV[1], 'rq:results:' .. ARGV[1]); \
+			redis.call('ZREM', 'rq:failed:' .. ARGV[2], ARGV[1]); \
+			redis.call('ZREM', 'rq:finished:' .. ARGV[2], ARGV[1]); \
+			return n" 0 "$(ASU_BUILD_HASH)" "$(ASU_RQ_QUEUE)" \
+		| sed 's/^(integer) \(.*\)/ - $(ASU_BUILD_HASH): \1 keys deleted/'
+	else
+		$(ASU_COMPOSE) exec -T redis redis-cli --no-raw EVAL " \
+			local ids = redis.call('ZRANGE', 'rq:failed:' .. ARGV[1], 0, -1); \
+			for _, id in ipairs(ids) do \
+				redis.call('DEL', 'rq:job:' .. id, 'rq:results:' .. id); \
+				redis.call('ZREM', 'rq:failed:' .. ARGV[1], id); \
+			end; \
+			return #ids" 0 "$(ASU_RQ_QUEUE)" \
+		| sed 's/^(integer) \(.*\)/ - \1 failed builds forgotten/'
+	fi
+
 asu.push.profile.%: ## Push src imagebuilder image for profile to ASU registry
 	$(call Setup/Vars,$(IMG_DIR)/profiles/$*/config.mk)
 	$(call Asu/Push)
