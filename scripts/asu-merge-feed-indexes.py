@@ -53,6 +53,8 @@ _fetch_cache: dict[str, bytes | None] = {}
 # stays in place
 fetch_failures: list[str] = []
 extra_failures: list[str] = []
+# (repositories-extra.conf, line) already warned about as malformed
+_bad_lines: set[tuple[str, str]] = set()
 
 # repositories-extra.conf spelling of this host's asu metadata server, the
 # Makefile renders it to ASU_UPSTREAM_CUSTOM for the imagebuilder
@@ -250,9 +252,22 @@ def mirror_extra_repos(
     for repo_file in repo_files:
         for line in Path(repo_file).read_text().splitlines():
             fields = line.split()
+            if not fields or fields[0].startswith("#"):
+                continue
             if len(fields) != 3 or fields[0] != "src/gz":
+                # a bare apk url (.../packages.adb) has no feed name to key
+                # the index by; every arch dir sees the line, warn once
+                if (repo_file, line) not in _bad_lines:
+                    _bad_lines.add((repo_file, line))
+                    print(
+                        f" - WARNING {repo_file}: not 'src/gz <name> <url>', "
+                        f"skipped: {line}"
+                    )
                 continue
             _, feed, url = fields
+            # the imagebuilder side (ib-add-repos.sh) accepts an apk style
+            # url naming the index file; the indexes here sit next to it
+            url = url.rstrip("/").removesuffix("/packages.adb")
 
             # repositories served by this very metadata tree (local_core on
             # the asu metadata server, written as @ASU_UPSTREAM_CUSTOM@): their
@@ -264,7 +279,7 @@ def mirror_extra_repos(
                 print(f" - extra {feed}: served by this metadata tree, skipped")
                 continue
 
-            packages = fetch_extra_packages(url.rstrip("/"), arch_dir.name)
+            packages = fetch_extra_packages(url, arch_dir.name)
             if packages is None:
                 kept = (arch_dir / feed / "index.json").is_file()
                 print(

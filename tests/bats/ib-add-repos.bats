@@ -59,6 +59,24 @@ apk_tree() {
     [ "$(cat repositories)" = "${expected}" ]
 }
 
+@test "apk: lines other than src/gz <name> <url> warned about and skipped" {
+    apk_tree
+    cat >> "${WS}/extra.conf" <<'EOF'
+http://repo.example/bare/packages.adb
+src/gz r_two http://repo.example/a http://repo.example/b
+EOF
+
+    run --separate-stderr "${SCRIPT}" "${WS}/extra.conf"
+
+    [ "${status}" -eq 0 ]
+    [[ "${stderr}" == *"skip it: option foo bar"* ]]
+    [[ "${stderr}" == *"skip it: http://repo.example/bare/packages.adb"* ]]
+    [[ "${stderr}" == *"skip it: src/gz r_two"* ]]
+    [[ "${stderr}" != *"r_dir"* ]]
+    [[ "${stderr}" != *"# comment"* ]]
+    run ! grep -q -e bare -e 'example/a' repositories
+}
+
 @test "apk: keys copied, --allow-untrusted forced, wget tries limited" {
     apk_tree
 

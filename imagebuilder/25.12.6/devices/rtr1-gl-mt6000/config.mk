@@ -4,7 +4,10 @@ CONFIG_PROFILE := glinet_gl-mt6000
 CONFIG_DEVICE := rtr1-gl-mt6000
 
 # 25.12: ethstatus has no 25.12 build (it came from the 24.10 modemfeed);
-# libstdcpp6 is the opkg name with the ABI suffix, the apk package is libstdcpp
+# libstdcpp6 is the opkg name with the ABI suffix, the apk package is libstdcpp;
+# the modemfeed openvpn with the netifd proto handler (luci-proto-openvpn needs
+# it) is openvpn-openssl-xor in 25.12, plain openvpn-openssl is the official
+# build without the handler
 CONFIG_CUSTOM_PKGS := \
 	beszel-agent \
 	bind-dig \
@@ -34,7 +37,7 @@ CONFIG_CUSTOM_PKGS := \
 	luci-proto-wireguard \
 	mtr-json \
 	openconnect \
-	openvpn-openssl \
+	openvpn-openssl-xor \
 	owut \
 	ssclash-mihomo \
 	tcpdump \

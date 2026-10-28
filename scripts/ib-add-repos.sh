@@ -24,6 +24,12 @@ keys=${2:-}
 
 [ -s "$conf" ] || exit 0
 
+# the apk path below and the asu index merge only take src/gz lines: a bare
+# apk url (.../packages.adb) has no feed name and would vanish silently
+awk 'NF && $1 !~ /^#/ && ($1 != "src/gz" || NF != 3) {
+    print " - WARNING " FILENAME ": not \"src/gz <name> <url>\", apk and asu skip it: " $0
+}' "$conf" >&2
+
 if [ -f repositories.conf ]; then
     echo " - custom repositories (opkg)"
     cat "$conf" >> repositories.conf
@@ -33,7 +39,7 @@ elif [ -f repositories ]; then
     # apk repository entries point at the index file itself (the official
     # list is .../packages/packages.adb, see include/feeds.mk), the opkg
     # style lines name the directory
-    urls=$(awk '$1 == "src/gz" && NF >= 3 {
+    urls=$(awk '$1 == "src/gz" && NF == 3 {
         sub("/+$", "", $3)
         if ($3 !~ /\.adb$/) $3 = $3 "/packages.adb"
         print $3
